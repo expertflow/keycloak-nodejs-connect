@@ -81,7 +81,7 @@ class NodeAdapter {
         });
     }
 
-    createResource(resource_name, resource_scope = "bank-account") {
+    createResource(resource_name, resource_scope = env.SCOPE_NAME) {
         return new Promise(async (resolve, reject) => {
 
             var URL = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
@@ -286,7 +286,7 @@ class NodeAdapter {
         });
     }
     //   R.E.S.O.U.R.C.E    A.U.T.H.O.R.I.Z.A.T.I.O.N        (    E.V.A.L.U.A.T.E    U.S.E.R    T.O   A    R.E.S.O.U.R.C.E   )
-    ResoucreAuthorization(keycloak_user_id, resource_name) {
+    resoucreAuthorization(keycloak_user_id, resource_name) {
         return new Promise(async (resolve, reject) => {
             let token;
             var config = {
