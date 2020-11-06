@@ -1,0 +1,1 @@
+# keyloak-adapter
