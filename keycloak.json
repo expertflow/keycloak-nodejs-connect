@@ -1,0 +1,24 @@
+{
+  "realm": "university",
+  "auth-server-url": "http://192.168.1.47:8080/auth/",
+  "ssl-required": "external",
+  "resource": "Banks",
+  "verify-token-audience": true,
+  "credentials": {
+    "secret": "2e991b1c-d340-437d-91a2-620465c51a4e"
+  },
+  "confidential-port": 0,
+  "policy-enforcer": {},
+
+  "CLIENT_ID": "Bank",
+  "CLIENT_SECRET": "2e991b1c-d340-437d-91a2-620465c51a4e",
+  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+  "GRANT_TYPE": "password",
+  "HOST": "192.168.1.47",
+  "PORT": "8080",
+  "REALM": "university",
+  "GRANT_TYPE_PAT": "client_credentials",
+  "USERNAME_ADMIN": "admin2",
+  "PASSWORD_ADMIN": "admin2",
+  "SCOPE_NAME": "bank-account-scope"
+}

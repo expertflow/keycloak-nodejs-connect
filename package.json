@@ -1,0 +1,19 @@
+{
+  "name": "keycloak_adapter",
+  "version": "1.0.0",
+  "description": "node based keycloak adapter",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/expertflow/keyloak-adapter/tree/CIM"
+  },
+  "author": "saqib",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.21.0",
+    "express": "^4.17.1"
+  }
+}
