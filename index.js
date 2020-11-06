@@ -1,6 +1,6 @@
 var express = require('express');
 const requestController = require("./controller/requestController.js");
-const env = require("./keycloak.json");
+const env = require("../../keycloak.json");
 var bodyParser = require('body-parser');
 var app = express();
 const qs = require('querystring');
