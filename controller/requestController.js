@@ -2,7 +2,7 @@ const axios = require('axios')
 const qs = require('querystring');
 module.exports={
 
-axiosRequest12 : (config,flag)  => {
+httpRequest : (config,flag)  => {
 
     return new Promise((resolve, reject) => {
 

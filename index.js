@@ -39,7 +39,7 @@ class NodeAdapter {
             };
             try {
                 //  T.O.K.E.N   R.E.Q.U.E.S.T   # 1   ( P.E.R.M.I.S.S.I.O.N.S   N.O.T    I.N.C.L.U.D.E.D) 
-                let tokenResponse = await requestController.axiosRequest12(config, Boolean(10 > 5));
+                let tokenResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                 if (tokenResponse.data.access_token) {
                     token = tokenResponse.data.access_token;
                     config.data.grant_type = 'urn:ietf:params:oauth:grant-type:uma-ticket';
@@ -48,7 +48,7 @@ class NodeAdapter {
                     config.headers.Authorization = "Bearer " + token;
                     //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)                 
                     try {
-                        var rptResponse = await requestController.axiosRequest12(config, Boolean(10 > 5));
+                        var rptResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                         if (rptResponse.data.access_token) {
                             token = rptResponse.data.access_token;
                             // delete config.data["username"];
@@ -57,7 +57,7 @@ class NodeAdapter {
                             URL = URL + '/introspect'
                             config.url = URL;
                             try {
-                                let intrsopectionResponse = await requestController.axiosRequest12(config, Boolean(10 > 5));
+                                let intrsopectionResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                                 intrsopectionResponse.data.access_token = token;
                                 resolve(intrsopectionResponse);
                             }
@@ -101,7 +101,7 @@ class NodeAdapter {
             };
             //  P.A.T   T.O.K.E.N   R.E.Q.U.E.S.T   # 1     
             try {
-                let patToken = await requestController.axiosRequest12(config, Boolean(10 > 9));
+                let patToken = await requestController.httpRequest(config, Boolean(10 > 9));
                 if (patToken.data.access_token) {
                     let token = patToken.data.access_token;
                     //     C.R.E.A.T.E    R.E.S.O.U.R.C.E     R.E.Q.U.E.S.T   
@@ -118,7 +118,7 @@ class NodeAdapter {
                     config.headers['Content-Type'] = 'application/json';
 
                     try {
-                        let resourceResponse = await requestController.axiosRequest12(config, Boolean(10 > 14));
+                        let resourceResponse = await requestController.httpRequest(config, Boolean(10 > 14));
                         console.log("Created" + resourceResponse.data);
                         resolve(resourceResponse);
                     } catch (error) {
@@ -153,7 +153,7 @@ class NodeAdapter {
             };
             //  P.A.T   T.O.K.E.N   R.E.Q.U.E.S.T   # 1      
             try {
-                let patToken = await requestController.axiosRequest12(config, Boolean(10 > 9));
+                let patToken = await requestController.httpRequest(config, Boolean(10 > 9));
                 if (patToken.data.access_token) {
                      token = patToken.data.access_token;
                     //  D.E.L.E.T.E    R.E.S.O.U.R.C.E  A.N.D   P.E.R.M.I.S.S.I.O.N   R.E.Q.U.E.S.T   
@@ -165,7 +165,7 @@ class NodeAdapter {
                     delete config.data["grant_type"];
                     config.data.name = resource_name;
                     try {
-                        let resourceResponse = await requestController.axiosRequest12(config, Boolean(10 > 9));
+                        let resourceResponse = await requestController.httpRequest(config, Boolean(10 > 9));
                         console.log("resource deleted");
                         //         // WE NEED admin token to delete policy
                         //         /// admin token request
@@ -178,7 +178,7 @@ class NodeAdapter {
                         config.data.grant_type = env.GRANT_TYPE;
                         config.data.client_secret = env.CLIENT_SECRET;
                         try {
-                            let adminTokenResponse = await requestController.axiosRequest12(config, Boolean(10 > 9));
+                            let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
                             token = adminTokenResponse.data.access_token;
                             // now deleting policy
                             let URL2 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
@@ -186,7 +186,7 @@ class NodeAdapter {
                             config.method = 'delete';
                             config.headers.Authorization = 'Bearer ' + token;
                             try {
-                                let deletePolicy = await requestController.axiosRequest12(config, Boolean(10 > 9));
+                                let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 9));
                                 resolve("Policy Deleted");
                             } catch (error) {
                                 reject("Policy not found" + error);
@@ -228,7 +228,7 @@ class NodeAdapter {
                 }
             };
             try {
-                let adminTokenResponse = await requestController.axiosRequest12(config, Boolean(10 > 9));
+                let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
                 token = adminTokenResponse.data.access_token;
                 console.log("admin token");
                 //   T.O.K.E.N    R.E.Q.U.E.S.T  (user called admin2 is already defined in keycloak with roles 'realm-management')
@@ -256,7 +256,7 @@ class NodeAdapter {
 
                 config.data =JSON.stringify(config.data);
                 try {
-                    let policyResponse = await requestController.axiosRequest12(config, Boolean(10 > 11));
+                    let policyResponse = await requestController.httpRequest(config, Boolean(10 > 11));
                     console.log("Policy created");
                     config.data =JSON.parse(config.data);
                     //  A.S.S.O.C.I.A.T.E   P.E.R.M.I.S.S.I.O.N   T.O   A  R.E.S.O.U.R.C.E   ( U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y   I.S  A.S.S.O.C.I.A.T.E.D   T.O    P.E.R.M)  
@@ -271,7 +271,7 @@ class NodeAdapter {
                     let URL4 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
                     config.url = URL4;
                     try {
-                        let permissionResponse = await requestController.axiosRequest12(config, Boolean(10 > 11));
+                        let permissionResponse = await requestController.httpRequest(config, Boolean(10 > 11));
                         console.log("permission created");
                         resolve(permissionResponse);
                     } catch (error) {
@@ -306,7 +306,7 @@ class NodeAdapter {
                 }
             };
             try {
-                let adminTokenResponse = await requestController.axiosRequest12(config,Boolean(11>10));
+                let adminTokenResponse = await requestController.httpRequest(config,Boolean(11>10));
                 token = adminTokenResponse.data.access_token;
                 // EVALUATION REQUEST
                 var data = JSON.stringify({
@@ -332,7 +332,7 @@ class NodeAdapter {
                     config.data =JSON.stringify(config.data);
                 
                 try {
-                    let evaluationResponse = await requestController.axiosRequest12(config, Boolean(10 > 11));
+                    let evaluationResponse = await requestController.httpRequest(config, Boolean(10 > 11));
                     resolve(evaluationResponse);
                 }
                 catch (error) {
@@ -369,7 +369,7 @@ class NodeAdapter {
                     }
                 };
                 try {
-                    let adminTokenResponse = await requestController.axiosRequest12(config, Boolean(12 > 11));
+                    let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
                     token = adminTokenResponse.data.access_token;
                     //console.log("admin token:"+token);
                     // now deleting policy
@@ -383,7 +383,7 @@ class NodeAdapter {
                     config.headers.Authorization='Bearer ' + token;
                     try {
                         console.log(config);
-                        let deletePolicy = await requestController.axiosRequest12(config, Boolean(10 > 11));
+                        let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
                         resolve(deletePolicy);
                     } catch (error) {
                         reject(error);
