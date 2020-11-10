@@ -10,9 +10,6 @@ app.use(bodyParser.urlencoded({
     extended: true
 }));
 app.use(bodyParser.json());
-
-const URL = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
-
 class NodeAdapter {
 
     constructor() {}
@@ -231,10 +228,9 @@ class NodeAdapter {
                 let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
                 token = adminTokenResponse.data.access_token;
                 console.log("admin token");
-                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user called admin2 is already defined in keycloak with roles 'realm-management')
+                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin access is already defined in keycloak with roles 'realm-management')
 
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
-               // console.log("fadggggggggg//////////// :  " + JSON.stringify(config.data));
 
                 let URL3 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user';
                 config.url = URL3;
@@ -309,11 +305,6 @@ class NodeAdapter {
                 let adminTokenResponse = await requestController.httpRequest(config,Boolean(11>10));
                 token = adminTokenResponse.data.access_token;
                 // EVALUATION REQUEST
-                var data = JSON.stringify({
-                     "resources": [{ "_id": resource_name }],
-                     "clientId": env.CLIENT_DB_ID, 
-                     "userId": keycloak_user_id 
-                    });
                     config.data.clientId = env.CLIENT_DB_ID;
                     config.data.resources=[{ "_id": resource_name }];
                     config.data.userId=  keycloak_user_id;
@@ -322,9 +313,7 @@ class NodeAdapter {
                     delete config.data["password"];
                     delete config.data["grant_type"];
                     delete config.data["client_secret"];
-                    delete config.data["client_id"];
-
-             
+                    delete config.data["client_id"];             
                    let URL5= 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
                     config.url=URL5;
                     config.headers['Content-Type']='application/json';
@@ -336,10 +325,10 @@ class NodeAdapter {
                     resolve(evaluationResponse);
                 }
                 catch (error) {
-                    reject("Policy error" + error);
+                    reject(error);
                 };
             } catch (error) {
-                reject("Policy error" + error);
+                reject(error);
             };
         });
     }
