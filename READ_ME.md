@@ -1,56 +1,54 @@
 
-** Node JS module for keycloak  **
+<h1>Node JS module for keycloak</h1>
 
 This module can be installed with
-sudo npm install keycloak_adapter
+* __sudo npm install keycloak_adapter__
 
 This module can be used by importing index.js file in your application like this
-require("./node_modules/keycloak_adapter/index.js");
+* _require("./node_modules/keycloak_adapter/index.js");_
 
-Index.js have a class called NodeAdapter which have following functions:
-userAuthentication
-createResource
-deleteResource
-permitUsertoResoucre
-resoucreAuthorization
-revokeUseronResource
+Index.js have a class called __NodeAdapter__ which have following functions:
+* userAuthentication
+* createResource
+* deleteResource
+* permitUsertoResoucre
+* resoucreAuthorization
+* revokeUseronResource
+
 
 Each function can be called like this
-let nodeAdapter = require("./node_modules/keycloak_adapter/index.js");
-let adapter= nodeAdapter.NodeAdapter;
-let obj1=new adapter();
-obj1.userAuthentication();
+1. *let nodeAdapter = require("./node_modules/keycloak_adapter/index.js");*
+2. *let adapter= nodeAdapter.NodeAdapter;*
+3. *let obj1=new adapter();*
+4. *obj1.userAuthentication();*
 
 
-
-
-You need to have a keycloak.json file in the root directory which contains all the configurations. Sample file is given below:
+You need to have a __keycloak.json file__ in the _root_ directory which contains all the configurations.
+Sample file is given below:
 
 {
- "realm": "university",
- "auth-server-url": "http://192.168.1.47:8080/auth/",
- "ssl-required": "external",
- "resource": "Banks",
- "verify-token-audience": true,
- "credentials": {
-   "secret": "2e991b1c-d340-437d-91a2-620465c51a4e"
- },
- "confidential-port": 0,
- "policy-enforcer": {},
- 
- "CLIENT_ID": "Bank",
- "CLIENT_SECRET": "2e991b1c-d340-437d-91a2-620465c51a4e",
- "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
- "GRANT_TYPE": "password",
- "HOST": "192.168.1.47",
- "PORT": "8080",
- "REALM": "university",
- "GRANT_TYPE_PAT": "client_credentials",
- "USERNAME_ADMIN": "admin2",
- "PASSWORD_ADMIN": "admin2",
- "SCOPE_NAME": "bank-account-scope"
+  "realm": "university",
+  "auth-server-url": "http://192.168.1.47:8080/auth/",
+  "ssl-required": "external",
+  "resource": "Banks",
+  "verify-token-audience": true,
+  "credentials": {
+    "secret": "2e991b1c-d340-437d-91a2-620465c51a4e"
+  },
+  "confidential-port": 0,
+  "policy-enforcer": {},
+  "CLIENT_ID": "Bank",
+  "CLIENT_SECRET": "2e991b1c-d340-437d-91a2-620465c51a4e",
+  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+  "GRANT_TYPE": "password",
+  "HOST": "192.168.1.47",
+  "PORT": "8080",
+  "REALM": "university",
+  "GRANT_TYPE_PAT": "client_credentials",
+  "USERNAME_ADMIN": "admin2",
+  "PASSWORD_ADMIN": "admin2",
+  "SCOPE_NAME": "bank-account-scope"
 }
-
 
 
 Detail of functions is given below:
