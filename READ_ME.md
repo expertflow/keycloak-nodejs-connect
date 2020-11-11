@@ -67,7 +67,7 @@ __Detail of functions is given below:__
 This function ask keycloak whether user exists in keycloak or not. If user exists it returns an access_token which have all the roles,permissions and other data against that user.
 ```
 
-##### createResource(resource_name, resource_scope = "bank-account")
+##### createResource(resource_name, resource_scope = env.SCOPE_NAME)
 ```
 This function creates a resource in keycloak. The default value is defined in the keycloak.json file. We only pass resource_name into a function and it creates a resource in keycloak client under Authorization tab.
 ```
