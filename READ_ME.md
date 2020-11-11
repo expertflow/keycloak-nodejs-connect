@@ -61,28 +61,33 @@ Sample file is given below:
 }
 ```
 __Detail of functions is given below:__
+
+##### userAuthentication(user_name, user_password)
 ```
-userAuthentication(user_name, user_password)
 This function ask keycloak whether user exists in keycloak or not. If user exists it returns an access_token which have all the roles,permissions and other data against that user.
 ```
+
+##### createResource(resource_name, resource_scope = "bank-account")
 ```
-createResource(resource_name, resource_scope = "bank-account")
 This function creates a resource in keycloak. The default value is defined in the keycloak.json file. We only pass resource_name into a function and it creates a resource in keycloak client under Authorization tab.
 ```
+##### deleteResource(resource_name) 
 ```
-deleteResource(resource_name) 
 This function takes just one parameter as a resource_name and then deletes the requested resource in keycloak.
 ```
+
+##### permitUsertoResoucre(resource_name, keycloak_user_id)
 ```
-permitUsertoResoucre(resource_name, keycloak_user_id)
 This function takes user_id and make a user based policy for that user. It then assign that policy to permission and then associate that permission with the resource.
 ```
+
+##### resoucreAuthorization(keycloak_user_id, resource_name) 
 ```
-resoucreAuthorization(keycloak_user_id, resource_name) 
 This function evaluates whether the user is allowed access to the resource. In case of true it return “Permit” else “Deny”.
 ```
+
+##### revokeUseronResource = (resource_name, keycloak_user_id) 
 ```
-revokeUseronResource = (resource_name, keycloak_user_id) 
 This function is used to delete policy and permissions associated with a keycloak_user_id to a resource.
 ```
 
