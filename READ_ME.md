@@ -1,28 +1,37 @@
 
-<h1>Node JS module for keycloak</h1>
+# Node JS module for keycloak
+Keycloak is an Open Source Identity and Access Management solution for modern Applications and Services.
 
-This module can be installed with
-* __sudo npm install keycloak_adapter__
+This repository contains the source code for the Keycloak Node.js adapter. This module makes it simple to implement a Node.js Connect-friendly application that uses Keycloak for its authentication and authorization needs.
 
-This module can be used by importing index.js file in your application like this
-* _require("./node_modules/keycloak_adapter/index.js");_
+[Documentation](https://www.keycloak.org/documentation.html)
 
-Index.js have a class called __NodeAdapter__ which have following functions:
-* userAuthentication
-* createResource
-* deleteResource
-* permitUsertoResoucre
-* resoucreAuthorization
-* revokeUseronResource
+## Getting started
+
+### Installation 
+```javascript
+ npm install keycloak_adapter
+ ```
+ 
+## Usage
+
+### Functions
+```
+ userAuthentication
+ createResource
+ deleteResource
+ permitUsertoResoucre
+ resoucreAuthorization
+ revokeUseronResource
+```
+### Example
 
 ```
-Each function can be called like this
- let nodeAdapter = require("./node_modules/keycloak_adapter/index.js");
- let adapter= nodeAdapter.NodeAdapter;
- let obj1=new adapter();
- obj1.userAuthentication();
-```
+  let Keycloak = require("keycloak_adapter");
+  let keycloak= Keycloak.NodeAdapter;
+  keycloak.userAuthentication();
 
+```
 
 You need to have a __keycloak.json file__ in the _root_ directory which contains all the configurations.
 Sample file is given below:
@@ -54,11 +63,11 @@ Sample file is given below:
 __Detail of functions is given below:__
 ```
 userAuthentication(user_name, user_password)
-This function takes two parameters. It then ask keycloak whether user exists in keycloak or not. If user exists it returns an access_token which have all the roles,permissions and other data against that user.
+This function ask keycloak whether user exists in keycloak or not. If user exists it returns an access_token which have all the roles,permissions and other data against that user.
 ```
 ```
 createResource(resource_name, resource_scope = "bank-account")
-This function takes 2 parameters in which one is default. The default value is defined in the keycloak.json file. We only pass resource_name into a function and it creates a resource in keycloak client under Authorization tab.
+This function creates a resource in keycloak. The default value is defined in the keycloak.json file. We only pass resource_name into a function and it creates a resource in keycloak client under Authorization tab.
 ```
 ```
 deleteResource(resource_name) 
