@@ -41,14 +41,12 @@ class NodeAdapter {
                     token = tokenResponse.data.access_token;
                     config.data.grant_type = 'urn:ietf:params:oauth:grant-type:uma-ticket';
                     config.data.audience = env.CLIENT_ID;
-
                     config.headers.Authorization = "Bearer " + token;
                     //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)                 
                     try {
                         var rptResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                         if (rptResponse.data.access_token) {
                             token = rptResponse.data.access_token;
-                            // delete config.data["username"];
                             config.data.grant_type = env.GRANT_TYPE;
                             config.data.token = token;
                             URL = URL + '/introspect'
@@ -116,7 +114,6 @@ class NodeAdapter {
 
                     try {
                         let resourceResponse = await requestController.httpRequest(config, Boolean(10 > 14));
-                        console.log("Created" + resourceResponse.data);
                         resolve(resourceResponse);
                     } catch (error) {
                         reject(error);
@@ -158,12 +155,10 @@ class NodeAdapter {
                     config.url = URL1;
                     config.method = 'delete';
                     config.headers.Authorization = 'Bearer ' + token;
-
                     delete config.data["grant_type"];
                     config.data.name = resource_name;
                     try {
                         let resourceResponse = await requestController.httpRequest(config, Boolean(10 > 9));
-                        console.log("resource deleted");
                         //         // WE NEED admin token to delete policy
                         //         /// admin token request
                         config.method = 'post';
@@ -175,18 +170,23 @@ class NodeAdapter {
                         config.data.grant_type = env.GRANT_TYPE;
                         config.data.client_secret = env.CLIENT_SECRET;
                         try {
-                            let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
+                            let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
                             token = adminTokenResponse.data.access_token;
                             // now deleting policy
-                            let URL2 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
-                            config.url = URL2;
-                            config.method = 'delete';
-                            config.headers.Authorization = 'Bearer ' + token;
+                            config.method='delete';
+                            delete config.data;
+                            let URL6 =   'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                            config.url=URL6;
+                            delete config.headers['Accept'];
+                            delete config.headers['cache-control'];
+                            delete config.headers['Content-Type'];
+                            config.headers.Authorization='Bearer ' + token;
                             try {
-                                let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 9));
-                                resolve("Policy Deleted");
+                                console.log(config);
+                                let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
+                                resolve(deletePolicy);
                             } catch (error) {
-                                reject("Policy not found" + error);
+                                reject(error);
                             }
                         } catch (error) {
                             reject(error);
@@ -227,33 +227,29 @@ class NodeAdapter {
             try {
                 let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
                 token = adminTokenResponse.data.access_token;
-                console.log("admin token");
-                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin access is already defined in keycloak with roles 'realm-management')
+                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user called admin2 is already defined in keycloak with roles 'realm-management')
 
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
+               // console.log("fadggggggggg//////////// :  " + JSON.stringify(config.data));
 
                 let URL3 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user';
                 config.url = URL3;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token;
-
                 config.data.decisionStrategy = 'UNANIMOUS';
                 config.data.logic = "POSITIVE";
                 config.data.name = userPolicyName;
                 config.data.type = "user";
                 config.data.id = userPolicyName;
                 config.data.users = [keycloak_user_id];
-
                 delete config.data["client_id"];
                 delete config.data["client_secret"];
                 delete config.data["grant_type"];
                 delete config.data["username"];
                 delete config.data["password"];
-
                 config.data =JSON.stringify(config.data);
                 try {
                     let policyResponse = await requestController.httpRequest(config, Boolean(10 > 11));
-                    console.log("Policy created");
                     config.data =JSON.parse(config.data);
                     //  A.S.S.O.C.I.A.T.E   P.E.R.M.I.S.S.I.O.N   T.O   A  R.E.S.O.U.R.C.E   ( U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y   I.S  A.S.S.O.C.I.A.T.E.D   T.O    P.E.R.M)  
                     config.data.name = resource_permissions;
@@ -262,13 +258,11 @@ class NodeAdapter {
                     config.data.policies=[userPolicyName];
                     config.data.resources=[resource_name];
                     delete config.data["users"];
-
                     config.data =JSON.stringify(config.data);
                     let URL4 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
                     config.url = URL4;
                     try {
                         let permissionResponse = await requestController.httpRequest(config, Boolean(10 > 11));
-                        console.log("permission created");
                         resolve(permissionResponse);
                     } catch (error) {
                         reject("Permisssion not created" + error);
@@ -305,15 +299,19 @@ class NodeAdapter {
                 let adminTokenResponse = await requestController.httpRequest(config,Boolean(11>10));
                 token = adminTokenResponse.data.access_token;
                 // EVALUATION REQUEST
+                var data = JSON.stringify({
+                     "resources": [{ "_id": resource_name }],
+                     "clientId": env.CLIENT_DB_ID, 
+                     "userId": keycloak_user_id 
+                    });
                     config.data.clientId = env.CLIENT_DB_ID;
                     config.data.resources=[{ "_id": resource_name }];
                     config.data.userId=  keycloak_user_id;
-
                     delete config.data["username"];
                     delete config.data["password"];
                     delete config.data["grant_type"];
                     delete config.data["client_secret"];
-                    delete config.data["client_id"];             
+                    delete config.data["client_id"];
                    let URL5= 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
                     config.url=URL5;
                     config.headers['Content-Type']='application/json';
@@ -371,7 +369,6 @@ class NodeAdapter {
                     delete config.headers['Content-Type'];
                     config.headers.Authorization='Bearer ' + token;
                     try {
-                        console.log(config);
                         let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
                         resolve(deletePolicy);
                     } catch (error) {
@@ -380,7 +377,6 @@ class NodeAdapter {
                 } catch (error) {
                     reject(error);
                 }
-    
                 // }else{
                 //     console.log("user already not permitted");
                 // }
@@ -390,5 +386,6 @@ class NodeAdapter {
         });
     }
 }
+//export new NodeAdapter;
 
-module.exports.NodeAdapter = NodeAdapter;
+module.exports.NodeAdapter = new NodeAdapter;
