@@ -182,7 +182,6 @@ class NodeAdapter {
                             delete config.headers['Content-Type'];
                             config.headers.Authorization='Bearer ' + token;
                             try {
-                                console.log(config);
                                 let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
                                 resolve(deletePolicy);
                             } catch (error) {
@@ -227,11 +226,8 @@ class NodeAdapter {
             try {
                 let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
                 token = adminTokenResponse.data.access_token;
-                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user called admin2 is already defined in keycloak with roles 'realm-management')
-
+                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
-               // console.log("fadggggggggg//////////// :  " + JSON.stringify(config.data));
-
                 let URL3 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user';
                 config.url = URL3;
                 config.headers['Content-Type'] = 'application/json';
@@ -358,7 +354,6 @@ class NodeAdapter {
                 try {
                     let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
                     token = adminTokenResponse.data.access_token;
-                    //console.log("admin token:"+token);
                     // now deleting policy
                     config.method='delete';
                     delete config.data;
@@ -386,6 +381,4 @@ class NodeAdapter {
         });
     }
 }
-//export new NodeAdapter;
-
 module.exports.NodeAdapter = new NodeAdapter;
