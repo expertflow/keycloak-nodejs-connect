@@ -60,7 +60,7 @@ Sample file is given below:
   "SCOPE_NAME": "bank-account-scope"
 }
 ```
-__Detail of functions is given below:__
+__Functions Description__
 
 ##### userAuthentication(user_name, user_password)
 ```
