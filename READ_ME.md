@@ -29,8 +29,16 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 ```
   let Keycloak = require("keycloak_adapter");
   let keycloak= Keycloak.NodeAdapter;
-  keycloak.userAuthentication();
+```
 
+Each function returns a promise so
+
+```
+keycloak.userAuthentication('agent1', 'agent1').then((e) => {
+    console.log("result :" + Object.entries(JSON.parse(JSON.stringify(e.data))));
+}).catch((er) => {
+    console.log("reject error : " + er);
+});
 ```
 
 You need to have a __keycloak.json file__ in the _root_ directory which contains all the configurations.
