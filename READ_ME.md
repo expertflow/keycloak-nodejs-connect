@@ -35,9 +35,9 @@ Each function returns a promise so
 
 ```
 keycloak.userAuthentication('agent1', 'agent1').then((e) => {
-    console.log("result :" + Object.entries(JSON.parse(JSON.stringify(e.data))));
+    console.log(e;
 }).catch((er) => {
-    console.log("reject error : " + er);
+    console.log(er);
 });
 ```
 
@@ -45,34 +45,30 @@ You need to have a __keycloak.json file__ in the _root_ directory which contains
 Sample file is given below:
 
 ```{
-  "realm": "university",
-  "auth-server-url": "http://192.168.1.47:8080/auth/",
+  "HOST": "192.168.1.47",
+  "PORT": "8080",
   "ssl-required": "external",
   "resource": "Banks",
   "verify-token-audience": true,
-  "credentials": {
-    "secret": "2e991b1c-d340-437d-91a2-620465c51a4e"
-  },
   "confidential-port": 0,
   "policy-enforcer": {},
+
   "CLIENT_ID": "Bank",
   "CLIENT_SECRET": "2e991b1c-d340-437d-91a2-620465c51a4e",
   "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
   "GRANT_TYPE": "password",
-  "HOST": "192.168.1.47",
-  "PORT": "8080",
   "REALM": "university",
   "GRANT_TYPE_PAT": "client_credentials",
-  "USERNAME_ADMIN": "admin2",
-  "PASSWORD_ADMIN": "admin2",
-  "SCOPE_NAME": "bank-account-scope"
+  "USERNAME_ADMIN": "_any user in realm with all roles_",
+  "PASSWORD_ADMIN": "_any user in realm with all roles_",
+  "SCOPE_NAME": "Any deafult scope"
 }
 ```
 __Functions Description__
 
 ##### userAuthentication(user_name, user_password)
 ```
-This function ask keycloak whether user exists in keycloak or not. If user exists it returns an access_token which have all the roles,permissions and other data against that user.
+This function ask keycloak whether user exists in keycloak or not. If user exists it returns an access_token with all the roles,permissions and other data against that user.
 ```
 
 ##### createResource(resource_name, resource_scope = env.SCOPE_NAME)
