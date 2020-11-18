@@ -45,23 +45,23 @@ You need to have a __keycloak.json file__ in the _root_ directory which contains
 Sample file is given below:
 
 ```{
-  "HOST": "192.168.1.47",
-  "PORT": "8080",
-  "ssl-required": "external",
-  "resource": "Banks",
-  "verify-token-audience": true,
-  "confidential-port": 0,
-  "policy-enforcer": {},
-
-  "CLIENT_ID": "Bank",
-  "CLIENT_SECRET": "2e991b1c-d340-437d-91a2-620465c51a4e",
-  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
-  "GRANT_TYPE": "password",
-  "REALM": "university",
-  "GRANT_TYPE_PAT": "client_credentials",
+  "HOST": "enter host name",
+  "PORT": "enter port number",
+  "REALM": "enter realm name",
+  "CLIENT_ID": "enter client-name",
+  "CLIENT_SECRET": "enter client-secret",
+  "CLIENT_DB_ID": "enter client-db-id",
   "USERNAME_ADMIN": "_any user in realm with all roles_",
   "PASSWORD_ADMIN": "_any user in realm with all roles_",
   "SCOPE_NAME": "Any deafult scope"
+  
+  "GRANT_TYPE": "password",
+  "ssl-required": "external",
+  "verify-token-audience": true,
+  "confidential-port": 0,
+  "policy-enforcer": {},
+  "GRANT_TYPE_PAT": "client_credentials",
+ 
 }
 ```
 __Functions Description__
