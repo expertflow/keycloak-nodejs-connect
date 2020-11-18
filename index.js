@@ -200,7 +200,7 @@ class NodeAdapter {
         });
     }
 
-    permitUsertoResoucre(resource_name, keycloak_user_id) {
+    permitUsertoResource(resource_name, keycloak_user_id) {
 
         return new Promise(async (resolve, reject) => {
             let token;
@@ -272,7 +272,7 @@ class NodeAdapter {
         });
     }
     //   R.E.S.O.U.R.C.E    A.U.T.H.O.R.I.Z.A.T.I.O.N        (    E.V.A.L.U.A.T.E    U.S.E.R    T.O   A    R.E.S.O.U.R.C.E   )
-    resoucreAuthorization(keycloak_user_id, resource_name) {
+    resourceAuthorization(keycloak_user_id, resource_name) {
         return new Promise(async (resolve, reject) => {
             let token;
             var config = {
@@ -330,7 +330,7 @@ class NodeAdapter {
         return new Promise(async (resolve, reject) => {
             let token;
             try {
-                // let checkAccess=  await ResoucreAuthorization(keycloak_user_id,resource_name).then((e)=>{
+                // let checkAccess=  await ResourceAuthorization(keycloak_user_id,resource_name).then((e)=>{
                 //     if(e.toString()==='PERMIT'){
                 // WE NEED admin token
                 /// admin token request
