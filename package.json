@@ -1,6 +1,6 @@
 {
   "name": "keycloak_adapter",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "node based keycloak adapter",
   "main": "index.js",
   "scripts": {
