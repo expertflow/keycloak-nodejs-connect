@@ -13,7 +13,7 @@ app.use(bodyParser.json());
 class NodeAdapter {
 
     constructor() {}
-    userAuthentication(user_name, user_password) {
+    authenticateUserViaKeycloak(user_name, user_password) {
 
         return new Promise(async (resolve, reject) => {
             let token;
@@ -51,10 +51,57 @@ class NodeAdapter {
                             config.data.token = token;
                             URL = URL + '/introspect'
                             config.url = URL;
+                     //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)                 
+
                             try {
                                 let intrsopectionResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                                 intrsopectionResponse.data.access_token = token;
-                                resolve(intrsopectionResponse);
+                    //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N) 
+                                try {
+                                    config.data.username=env.USERNAME_ADMIN;
+                                    config.data.password=env.PASSWORD_ADMIN;
+                                    config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
+                                    console.log(config.url);
+                                    delete config.data.audience;
+                                    delete config.data.token;
+                                    delete config.headers.Authorization;
+                                    let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
+                                    console.log(adminTokenResponse);
+                                    if (adminTokenResponse.data.access_token) {
+                                        token = adminTokenResponse.data.access_token;
+                                        try {
+                                            config.headers.Authorization = "Bearer " + token;
+                                            config.method='get';
+                                            config.url='http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/users?username=' + user_name;
+                                            delete config.data;
+                                            let getuserDetails = await requestController.httpRequest(config, Boolean(10 > 9));
+                                            let responseObject = {
+                                                'id': getuserDetails.data[0].id,
+                                                'firstName':getuserDetails.data[0].firstName,
+                                                'lastName':getuserDetails.data[0].lastName,
+                                                'username':getuserDetails.data[0].username,
+                                                'permittedResources': {
+                                                   'Resources': intrsopectionResponse.data.authorization.permissions
+                                                },
+                                                'roles': intrsopectionResponse.data.realm_access.roles,
+                                                'realm': env.REALM
+
+                                            };
+                                            resolve(responseObject);
+
+                                        }
+                                        catch(error){
+                                            reject("Get all users request not sent"+error);
+                                        }
+                                    }
+                                    else{
+                                        reject("Admin token Request Failed");
+
+                                    }
+                                }
+                                catch(error){
+                                    reject("Admin Request not sent"+error);
+                                }
                             }
                             catch (error) {
                                 reject(error);
