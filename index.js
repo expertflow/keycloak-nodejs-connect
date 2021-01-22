@@ -61,12 +61,10 @@ class NodeAdapter {
                                     config.data.username=env.USERNAME_ADMIN;
                                     config.data.password=env.PASSWORD_ADMIN;
                                     config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
-                                    console.log(config.url);
                                     delete config.data.audience;
                                     delete config.data.token;
                                     delete config.headers.Authorization;
                                     let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
-                                    console.log(adminTokenResponse);
                                     if (adminTokenResponse.data.access_token) {
                                         token = adminTokenResponse.data.access_token;
                                         try {
@@ -166,7 +164,7 @@ class NodeAdapter {
                         reject(error);
                     }
                 } else {
-                    console.log("token not found");
+                    console.log("Token not found");
                 }
             } catch (error) {
                 reject(error);
