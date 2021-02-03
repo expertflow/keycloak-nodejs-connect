@@ -119,6 +119,7 @@ class NodeAdapter {
                         var rptResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                         if (rptResponse.data.access_token) {
                             token = rptResponse.data.access_token;
+                            var userToken = token;
                             config.data.grant_type = env.GRANT_TYPE;
                             config.data.token = token;
                             URL = URL + '/introspect'
@@ -157,7 +158,11 @@ class NodeAdapter {
                                                 'realm': env.REALM
 
                                             };
-                                            resolve(responseObject);
+                                            let finalObject={
+                                                'token': userToken,
+                                                'keycloak_User' :responseObject
+                                            }
+                                            resolve(finalObject);
 
                                         }
                                         catch (error) {
