@@ -12,12 +12,84 @@ app.use(bodyParser.urlencoded({
 app.use(bodyParser.json());
 class NodeAdapter {
 
-    constructor() {}
+    constructor() { }
+
+    getUsersByRole(keycloak_roles) {
+        return new Promise(async (resolve, reject) => {
+            let token;
+            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/master/protocol/openid-connect/token'
+            let config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Accept': 'application/json',
+                    'cache-control': 'no-cache',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data: {
+                    username: 'admin',
+                    password: 'admin',
+                    client_id: process.env.CLIENT_ID || 'admin-cli',
+                    grant_type: process.env.GRANT_TYPE || 'password',
+                },
+            };
+            try {
+                //  T.O.K.E.N   R.E.Q.U.E.S.T   # 1   ( P.E.R.M.I.S.S.I.O.N.S   N.O.T    I.N.C.L.U.D.E.D) 
+                let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 5));
+                if (adminTokenResponse.data.access_token) {
+                    token = adminTokenResponse.data.access_token;
+                    delete config.data;
+                    config.method = 'get';
+                    config.headers.Authorization = "Bearer " + token;
+                    let userObject = {}
+                    let count = 0;
+                    let flag = true;
+                    let obj = [];
+                    for (let i = 0; i < keycloak_roles.length; i++) {
+                        try {
+                            config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/roles/' + keycloak_roles[i] + '/users'
+                            let getUsersfromRoles = await requestController.httpRequest(config, Boolean(10 > 5));
+                            userObject = getUsersfromRoles.data;
+                            for (let check = 0; check < userObject.length; check++) {
+                                let tobecheckedID = userObject[check].id;
+                                for (let org = 0; org < count; org++) {
+                                    if (tobecheckedID === obj[org].user_id) {
+                                        obj[org].user_roles += ', ' + keycloak_roles[i];
+                                        flag = false;
+                                    }
+                                }
+                                if (flag == true) {
+                                    obj[count] = {
+                                        'user_id': userObject[check].id,
+                                        'first_name': userObject[check].firstName,
+                                        'last_name': userObject[check].lastName,
+                                        'user_roles': keycloak_roles[i]
+                                    }
+                                    count = count + 1;
+                                }
+                            }
+                        }
+                        catch (er) {
+                            reject(er);
+                        }
+                    }
+                    resolve(obj);
+                }
+                else {
+                    reject("Access Token Request Failed");
+                }
+            }
+            catch (er) {
+                reject(er);
+            }
+        });
+    }
+
     authenticateUserViaKeycloak(user_name, user_password) {
 
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
+            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -31,7 +103,7 @@ class NodeAdapter {
                     password: user_password,
                     client_id: env.CLIENT_ID,
                     client_secret: env.CLIENT_SECRET,
-                    grant_type: env.GRANT_TYPE ,
+                    grant_type: env.GRANT_TYPE,
                 },
             };
             try {
@@ -51,15 +123,15 @@ class NodeAdapter {
                             config.data.token = token;
                             URL = URL + '/introspect'
                             config.url = URL;
-                     //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)                 
+                            //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)                 
 
                             try {
                                 let intrsopectionResponse = await requestController.httpRequest(config, Boolean(10 > 5));
                                 intrsopectionResponse.data.access_token = token;
-                    //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N) 
+                                //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N) 
                                 try {
-                                    config.data.username=env.USERNAME_ADMIN;
-                                    config.data.password=env.PASSWORD_ADMIN;
+                                    config.data.username = env.USERNAME_ADMIN;
+                                    config.data.password = env.PASSWORD_ADMIN;
                                     config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
                                     delete config.data.audience;
                                     delete config.data.token;
@@ -69,17 +141,17 @@ class NodeAdapter {
                                         token = adminTokenResponse.data.access_token;
                                         try {
                                             config.headers.Authorization = "Bearer " + token;
-                                            config.method='get';
-                                            config.url='http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/users?username=' + user_name;
+                                            config.method = 'get';
+                                            config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/users?username=' + user_name;
                                             delete config.data;
                                             let getuserDetails = await requestController.httpRequest(config, Boolean(10 > 9));
                                             let responseObject = {
                                                 'id': getuserDetails.data[0].id,
-                                                'firstName':getuserDetails.data[0].firstName,
-                                                'lastName':getuserDetails.data[0].lastName,
-                                                'username':getuserDetails.data[0].username,
+                                                'firstName': getuserDetails.data[0].firstName,
+                                                'lastName': getuserDetails.data[0].lastName,
+                                                'username': getuserDetails.data[0].username,
                                                 'permittedResources': {
-                                                   'Resources': intrsopectionResponse.data.authorization.permissions
+                                                    'Resources': intrsopectionResponse.data.authorization.permissions
                                                 },
                                                 'roles': intrsopectionResponse.data.realm_access.roles,
                                                 'realm': env.REALM
@@ -88,17 +160,17 @@ class NodeAdapter {
                                             resolve(responseObject);
 
                                         }
-                                        catch(error){
-                                            reject("Get all users request not sent"+error);
+                                        catch (error) {
+                                            reject("Get all users request not sent" + error);
                                         }
                                     }
-                                    else{
+                                    else {
                                         reject("Admin token Request Failed");
 
                                     }
                                 }
-                                catch(error){
-                                    reject("Admin Request not sent"+error);
+                                catch (error) {
+                                    reject("Admin Request not sent" + error);
                                 }
                             }
                             catch (error) {
@@ -124,7 +196,7 @@ class NodeAdapter {
     createResource(resource_name, resource_scope = env.SCOPE_NAME) {
         return new Promise(async (resolve, reject) => {
 
-            var URL = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
+            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -153,7 +225,7 @@ class NodeAdapter {
                     config.data._id = resource_name;
                     config.data.resource_scopes = [resource_scope];
 
-                    config.url = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/authz/protection/resource_set';
+                    config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/authz/protection/resource_set';
                     config.headers.Authorization = "Bearer " + token;
                     config.headers['Content-Type'] = 'application/json';
 
@@ -175,7 +247,7 @@ class NodeAdapter {
     deleteResource(resource_name) {
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
+            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
             let config = {
                 method: 'post',
                 url: URL,
@@ -185,8 +257,8 @@ class NodeAdapter {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
                 data: {
-                    client_id: env.CLIENT_ID ,
-                    client_secret: env.CLIENT_SECRET ,
+                    client_id: env.CLIENT_ID,
+                    client_secret: env.CLIENT_SECRET,
                     grant_type: env.GRANT_TYPE_PAT
                 },
             };
@@ -194,9 +266,9 @@ class NodeAdapter {
             try {
                 let patToken = await requestController.httpRequest(config, Boolean(10 > 9));
                 if (patToken.data.access_token) {
-                     token = patToken.data.access_token;
+                    token = patToken.data.access_token;
                     //  D.E.L.E.T.E    R.E.S.O.U.R.C.E  A.N.D   P.E.R.M.I.S.S.I.O.N   R.E.Q.U.E.S.T   
-                    let URL1 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/authz/protection/resource_set/' + resource_name;
+                    let URL1 = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/authz/protection/resource_set/' + resource_name;
                     config.url = URL1;
                     config.method = 'delete';
                     config.headers.Authorization = 'Bearer ' + token;
@@ -218,14 +290,14 @@ class NodeAdapter {
                             let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
                             token = adminTokenResponse.data.access_token;
                             // now deleting policy
-                            config.method='delete';
+                            config.method = 'delete';
                             delete config.data;
-                            let URL6 =   'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
-                            config.url=URL6;
+                            let URL6 = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                            config.url = URL6;
                             delete config.headers['Accept'];
                             delete config.headers['cache-control'];
                             delete config.headers['Content-Type'];
-                            config.headers.Authorization='Bearer ' + token;
+                            config.headers.Authorization = 'Bearer ' + token;
                             try {
                                 let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
                                 resolve(deletePolicy);
@@ -251,7 +323,7 @@ class NodeAdapter {
             let token;
             var userPolicyName = resource_name + "-policy";
             var resource_permissions = resource_name + "-permission";
-            var URL = 'http://' + env.HOST  + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
+            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
             var config = {
                 method: 'post',
                 url: URL,
@@ -263,7 +335,7 @@ class NodeAdapter {
                 data: {
                     client_id: env.CLIENT_ID,
                     username: env.USERNAME_ADMIN,
-                    password:env.PASSWORD_ADMIN,
+                    password: env.PASSWORD_ADMIN,
                     grant_type: env.GRANT_TYPE,
                     client_secret: env.CLIENT_SECRET
                 }
@@ -273,7 +345,7 @@ class NodeAdapter {
                 token = adminTokenResponse.data.access_token;
                 //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
-                let URL3 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user';
+                let URL3 = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user';
                 config.url = URL3;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token;
@@ -288,19 +360,19 @@ class NodeAdapter {
                 delete config.data["grant_type"];
                 delete config.data["username"];
                 delete config.data["password"];
-                config.data =JSON.stringify(config.data);
+                config.data = JSON.stringify(config.data);
                 try {
                     let policyResponse = await requestController.httpRequest(config, Boolean(10 > 11));
-                    config.data =JSON.parse(config.data);
+                    config.data = JSON.parse(config.data);
                     //  A.S.S.O.C.I.A.T.E   P.E.R.M.I.S.S.I.O.N   T.O   A  R.E.S.O.U.R.C.E   ( U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y   I.S  A.S.S.O.C.I.A.T.E.D   T.O    P.E.R.M)  
                     config.data.name = resource_permissions;
                     config.data.type = "resource";
                     config.data.id = resource_permissions;
-                    config.data.policies=[userPolicyName];
-                    config.data.resources=[resource_name];
+                    config.data.policies = [userPolicyName];
+                    config.data.resources = [resource_name];
                     delete config.data["users"];
-                    config.data =JSON.stringify(config.data);
-                    let URL4 = 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
+                    config.data = JSON.stringify(config.data);
+                    let URL4 = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
                     config.url = URL4;
                     try {
                         let permissionResponse = await requestController.httpRequest(config, Boolean(10 > 11));
@@ -331,34 +403,34 @@ class NodeAdapter {
                 data: {
                     client_id: env.CLIENT_ID,
                     username: env.USERNAME_ADMIN,
-                    password:env.PASSWORD_ADMIN,
+                    password: env.PASSWORD_ADMIN,
                     grant_type: env.GRANT_TYPE,
                     client_secret: env.CLIENT_SECRET
                 }
             };
             try {
-                let adminTokenResponse = await requestController.httpRequest(config,Boolean(11>10));
+                let adminTokenResponse = await requestController.httpRequest(config, Boolean(11 > 10));
                 token = adminTokenResponse.data.access_token;
                 // EVALUATION REQUEST
                 var data = JSON.stringify({
-                     "resources": [{ "_id": resource_name }],
-                     "clientId": env.CLIENT_DB_ID, 
-                     "userId": keycloak_user_id 
-                    });
-                    config.data.clientId = env.CLIENT_DB_ID;
-                    config.data.resources=[{ "_id": resource_name }];
-                    config.data.userId=  keycloak_user_id;
-                    delete config.data["username"];
-                    delete config.data["password"];
-                    delete config.data["grant_type"];
-                    delete config.data["client_secret"];
-                    delete config.data["client_id"];
-                   let URL5= 'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
-                    config.url=URL5;
-                    config.headers['Content-Type']='application/json';
-                    config.headers.Authorization='Bearer ' + token,
-                    config.data =JSON.stringify(config.data);
-                
+                    "resources": [{ "_id": resource_name }],
+                    "clientId": env.CLIENT_DB_ID,
+                    "userId": keycloak_user_id
+                });
+                config.data.clientId = env.CLIENT_DB_ID;
+                config.data.resources = [{ "_id": resource_name }];
+                config.data.userId = keycloak_user_id;
+                delete config.data["username"];
+                delete config.data["password"];
+                delete config.data["grant_type"];
+                delete config.data["client_secret"];
+                delete config.data["client_id"];
+                let URL5 = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
+                config.url = URL5;
+                config.headers['Content-Type'] = 'application/json';
+                config.headers.Authorization = 'Bearer ' + token,
+                    config.data = JSON.stringify(config.data);
+
                 try {
                     let evaluationResponse = await requestController.httpRequest(config, Boolean(10 > 11));
                     resolve(evaluationResponse);
@@ -379,7 +451,7 @@ class NodeAdapter {
                 //     if(e.toString()==='PERMIT'){
                 // WE NEED admin token
                 /// admin token request
-               
+
                 var config = {
                     method: 'post',
                     url: URL,
@@ -391,7 +463,7 @@ class NodeAdapter {
                     data: {
                         client_id: env.CLIENT_ID,
                         username: env.USERNAME_ADMIN,
-                        password:env.PASSWORD_ADMIN,
+                        password: env.PASSWORD_ADMIN,
                         grant_type: env.GRANT_TYPE,
                         client_secret: env.CLIENT_SECRET
                     }
@@ -400,14 +472,14 @@ class NodeAdapter {
                     let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
                     token = adminTokenResponse.data.access_token;
                     // now deleting policy
-                    config.method='delete';
+                    config.method = 'delete';
                     delete config.data;
-                    let URL6 =   'http://' + env.HOST  + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
-                    config.url=URL6;
+                    let URL6 = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                    config.url = URL6;
                     delete config.headers['Accept'];
                     delete config.headers['cache-control'];
                     delete config.headers['Content-Type'];
-                    config.headers.Authorization='Bearer ' + token;
+                    config.headers.Authorization = 'Bearer ' + token;
                     try {
                         let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
                         resolve(deletePolicy);
