@@ -45,6 +45,7 @@ class NodeAdapter {
                     let count = 0;
                     let flag = true;
                     let obj = [];
+                    let rolesCount=0;
                     for (let i = 0; i < keycloak_roles.length; i++) {
                         try {
                             config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/roles/' + keycloak_roles[i] + '/users'
@@ -53,17 +54,22 @@ class NodeAdapter {
                             for (let check = 0; check < userObject.length; check++) {
                                 let tobecheckedID = userObject[check].id;
                                 for (let org = 0; org < count; org++) {
-                                    if (tobecheckedID === obj[org].user_id) {
-                                        obj[org].user_roles += ', ' + keycloak_roles[i];
+                                    if (tobecheckedID === obj[org].id) {
+                                        obj[org].roles[++rolesCount] = keycloak_roles[i];
                                         flag = false;
                                     }
                                 }
                                 if (flag == true) {
                                     obj[count] = {
-                                        'user_id': userObject[check].id,
-                                        'first_name': userObject[check].firstName,
-                                        'last_name': userObject[check].lastName,
-                                        'user_roles': keycloak_roles[i]
+                                        'id': userObject[check].id,
+                                        'userName': userObject[check].username,
+                                        'firstName': userObject[check].firstName,
+                                        'lastName': userObject[check].lastName,
+                                        'roles': [keycloak_roles[i]]
+                                    }
+                                    if(obj[count].firstName == undefined){
+                                        obj[count].firstName="";
+                                        obj[count].lastName="";
                                     }
                                     count = count + 1;
                                 }
