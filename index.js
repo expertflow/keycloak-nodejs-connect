@@ -91,11 +91,11 @@ class NodeAdapter {
         });
     }
 
-    authenticateUserViaKeycloak(user_name, user_password) {
+    authenticateUserViaKeycloak(user_name, user_password,realm_name) {
 
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
+            var URL = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + realm_name + '/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -139,7 +139,7 @@ class NodeAdapter {
                                 try {
                                     config.data.username = env.USERNAME_ADMIN;
                                     config.data.password = env.PASSWORD_ADMIN;
-                                    config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
+                                    config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/realms/' + realm_name + '/protocol/openid-connect/token';
                                     delete config.data.audience;
                                     delete config.data.token;
                                     delete config.headers.Authorization;
@@ -149,7 +149,7 @@ class NodeAdapter {
                                         try {
                                             config.headers.Authorization = "Bearer " + token;
                                             config.method = 'get';
-                                            config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/users?username=' + user_name;
+                                            config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + realm_name + '/users?username=' + user_name;
                                             delete config.data;
                                             let getuserDetails = await requestController.httpRequest(config, Boolean(10 > 9));
                                             let responseObject = {
@@ -161,7 +161,7 @@ class NodeAdapter {
                                                     'Resources': intrsopectionResponse.data.authorization.permissions
                                                 },
                                                 'roles': intrsopectionResponse.data.realm_access.roles,
-                                                'realm': env.REALM
+                                                'realm': realm_name
 
                                             };
                                             let finalObject={

@@ -17,7 +17,8 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 
 ### Functions
 ```
- userAuthentication
+ authenticateUserViaKeycloak
+ getUsersByRole
  createResource
  deleteResource
  permitUsertoResoucre
@@ -66,9 +67,9 @@ Sample file is given below:
 ```
 __Functions Description__
 
-##### userAuthentication(user_name, user_password)
+##### authenticateUserViaKeycloak(user_name, user_password, realm_name)
 ```
-This function ask keycloak whether user exists in keycloak or not. If user exists it returns a KeyCloakUser object with the user information.
+This function ask keycloak whether user exists in keycloak realm or not. If user exists it returns a KeyCloakUser object with the user information.
 ```
 
 ##### createResource(resource_name, resource_scope = env.SCOPE_NAME)
@@ -94,6 +95,6 @@ This function evaluates whether the user is allowed access to the resource. In c
 ```
 This function is used to delete policy and permissions associated with a keycloak_user_id to a resource.
 ```
-#####     getUsersByRole(keycloak_roles) 
+#####   getUsersByRole(keycloak_roles) 
 ```
 This function is used to get users having roles (passed in parameter)
