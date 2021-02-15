@@ -13,7 +13,7 @@ app.use(bodyParser.json());
 class NodeAdapter {
 
     constructor() { }
-
+// this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
     getUsersByRole(keycloak_roles) {
         return new Promise(async (resolve, reject) => {
             let token;
@@ -29,27 +29,27 @@ class NodeAdapter {
                 data: {
                     username: 'admin',
                     password: 'admin',
-                    client_id: process.env.CLIENT_ID || 'admin-cli',
+                    client_id: 'admin-cli',
                     grant_type: process.env.GRANT_TYPE || 'password',
                 },
             };
             try {
                 //  T.O.K.E.N   R.E.Q.U.E.S.T   # 1   ( P.E.R.M.I.S.S.I.O.N.S   N.O.T    I.N.C.L.U.D.E.D) 
-                let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 5));
+                let adminTokenResponse = await requestController.httpRequest(config, true);
                 if (adminTokenResponse.data.access_token) {
                     token = adminTokenResponse.data.access_token;
                     delete config.data;
                     config.method = 'get';
                     config.headers.Authorization = "Bearer " + token;
-                    let userObject = {}
+                    let userObject = {} // to read data object having all users of a certain role
                     let count = 0;
                     let flag = true;
-                    let obj = [];
+                    let obj = [];  // final object to be returned
                     let rolesCount=0;
                     for (let i = 0; i < keycloak_roles.length; i++) {
                         try {
                             config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/roles/' + keycloak_roles[i] + '/users'
-                            let getUsersfromRoles = await requestController.httpRequest(config, Boolean(10 > 5));
+                            let getUsersfromRoles = await requestController.httpRequest(config, true);
                             userObject = getUsersfromRoles.data;
                             for (let check = 0; check < userObject.length; check++) {
                                 let tobecheckedID = userObject[check].id;
@@ -90,7 +90,7 @@ class NodeAdapter {
             }
         });
     }
-
+// this function requires an Admin user in keycloak.json having realm-management roles
     authenticateUserViaKeycloak(user_name, user_password,realm_name) {
 
         return new Promise(async (resolve, reject) => {
@@ -114,7 +114,7 @@ class NodeAdapter {
             };
             try {
                 //  T.O.K.E.N   R.E.Q.U.E.S.T   # 1   ( P.E.R.M.I.S.S.I.O.N.S   N.O.T    I.N.C.L.U.D.E.D) 
-                let tokenResponse = await requestController.httpRequest(config, Boolean(10 > 5));
+                let tokenResponse = await requestController.httpRequest(config, true);
                 if (tokenResponse.data.access_token) {
                     token = tokenResponse.data.access_token;
                     config.data.grant_type = 'urn:ietf:params:oauth:grant-type:uma-ticket';
@@ -122,7 +122,7 @@ class NodeAdapter {
                     config.headers.Authorization = "Bearer " + token;
                     //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)                 
                     try {
-                        var rptResponse = await requestController.httpRequest(config, Boolean(10 > 5));
+                        var rptResponse = await requestController.httpRequest(config, true);
                         if (rptResponse.data.access_token) {
                             token = rptResponse.data.access_token;
                             var userToken = token;
@@ -133,7 +133,7 @@ class NodeAdapter {
                             //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)                 
 
                             try {
-                                let intrsopectionResponse = await requestController.httpRequest(config, Boolean(10 > 5));
+                                let intrsopectionResponse = await requestController.httpRequest(config, true);
                                 intrsopectionResponse.data.access_token = token;
                                 //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N) 
                                 try {
@@ -143,7 +143,7 @@ class NodeAdapter {
                                     delete config.data.audience;
                                     delete config.data.token;
                                     delete config.headers.Authorization;
-                                    let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
+                                    let adminTokenResponse = await requestController.httpRequest(config, true);
                                     if (adminTokenResponse.data.access_token) {
                                         token = adminTokenResponse.data.access_token;
                                         try {
@@ -151,7 +151,7 @@ class NodeAdapter {
                                             config.method = 'get';
                                             config.url = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + realm_name + '/users?username=' + user_name;
                                             delete config.data;
-                                            let getuserDetails = await requestController.httpRequest(config, Boolean(10 > 9));
+                                            let getuserDetails = await requestController.httpRequest(config, true);
                                             let responseObject = {
                                                 'id': getuserDetails.data[0].id,
                                                 'firstName': getuserDetails.data[0].firstName,
@@ -224,7 +224,7 @@ class NodeAdapter {
             };
             //  P.A.T   T.O.K.E.N   R.E.Q.U.E.S.T   # 1     
             try {
-                let patToken = await requestController.httpRequest(config, Boolean(10 > 9));
+                let patToken = await requestController.httpRequest(config, true);
                 if (patToken.data.access_token) {
                     let token = patToken.data.access_token;
                     //     C.R.E.A.T.E    R.E.S.O.U.R.C.E     R.E.Q.U.E.S.T   
@@ -241,7 +241,7 @@ class NodeAdapter {
                     config.headers['Content-Type'] = 'application/json';
 
                     try {
-                        let resourceResponse = await requestController.httpRequest(config, Boolean(10 > 14));
+                        let resourceResponse = await requestController.httpRequest(config, false);
                         resolve(resourceResponse);
                     } catch (error) {
                         reject(error);
@@ -275,7 +275,7 @@ class NodeAdapter {
             };
             //  P.A.T   T.O.K.E.N   R.E.Q.U.E.S.T   # 1      
             try {
-                let patToken = await requestController.httpRequest(config, Boolean(10 > 9));
+                let patToken = await requestController.httpRequest(config, true);
                 if (patToken.data.access_token) {
                     token = patToken.data.access_token;
                     //  D.E.L.E.T.E    R.E.S.O.U.R.C.E  A.N.D   P.E.R.M.I.S.S.I.O.N   R.E.Q.U.E.S.T   
@@ -286,7 +286,7 @@ class NodeAdapter {
                     delete config.data["grant_type"];
                     config.data.name = resource_name;
                     try {
-                        let resourceResponse = await requestController.httpRequest(config, Boolean(10 > 9));
+                        let resourceResponse = await requestController.httpRequest(config, true);
                         //         // WE NEED admin token to delete policy
                         //         /// admin token request
                         config.method = 'post';
@@ -298,7 +298,7 @@ class NodeAdapter {
                         config.data.grant_type = env.GRANT_TYPE;
                         config.data.client_secret = env.CLIENT_SECRET;
                         try {
-                            let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
+                            let adminTokenResponse = await requestController.httpRequest(config, true);
                             token = adminTokenResponse.data.access_token;
                             // now deleting policy
                             config.method = 'delete';
@@ -310,7 +310,7 @@ class NodeAdapter {
                             delete config.headers['Content-Type'];
                             config.headers.Authorization = 'Bearer ' + token;
                             try {
-                                let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
+                                let deletePolicy = await requestController.httpRequest(config, false);
                                 resolve(deletePolicy);
                             } catch (error) {
                                 reject(error);
@@ -352,7 +352,7 @@ class NodeAdapter {
                 }
             };
             try {
-                let adminTokenResponse = await requestController.httpRequest(config, Boolean(10 > 9));
+                let adminTokenResponse = await requestController.httpRequest(config, true);
                 token = adminTokenResponse.data.access_token;
                 //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
@@ -373,7 +373,7 @@ class NodeAdapter {
                 delete config.data["password"];
                 config.data = JSON.stringify(config.data);
                 try {
-                    let policyResponse = await requestController.httpRequest(config, Boolean(10 > 11));
+                    let policyResponse = await requestController.httpRequest(config, false);
                     config.data = JSON.parse(config.data);
                     //  A.S.S.O.C.I.A.T.E   P.E.R.M.I.S.S.I.O.N   T.O   A  R.E.S.O.U.R.C.E   ( U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y   I.S  A.S.S.O.C.I.A.T.E.D   T.O    P.E.R.M)  
                     config.data.name = resource_permissions;
@@ -386,7 +386,7 @@ class NodeAdapter {
                     let URL4 = 'http://' + env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
                     config.url = URL4;
                     try {
-                        let permissionResponse = await requestController.httpRequest(config, Boolean(10 > 11));
+                        let permissionResponse = await requestController.httpRequest(config, false);
                         resolve(permissionResponse);
                     } catch (error) {
                         reject("Permisssion not created" + error);
@@ -420,7 +420,7 @@ class NodeAdapter {
                 }
             };
             try {
-                let adminTokenResponse = await requestController.httpRequest(config, Boolean(11 > 10));
+                let adminTokenResponse = await requestController.httpRequest(config, true);
                 token = adminTokenResponse.data.access_token;
                 // EVALUATION REQUEST
                 var data = JSON.stringify({
@@ -443,7 +443,7 @@ class NodeAdapter {
                     config.data = JSON.stringify(config.data);
 
                 try {
-                    let evaluationResponse = await requestController.httpRequest(config, Boolean(10 > 11));
+                    let evaluationResponse = await requestController.httpRequest(config, false);
                     resolve(evaluationResponse);
                 }
                 catch (error) {
@@ -480,7 +480,7 @@ class NodeAdapter {
                     }
                 };
                 try {
-                    let adminTokenResponse = await requestController.httpRequest(config, Boolean(12 > 11));
+                    let adminTokenResponse = await requestController.httpRequest(config, true);
                     token = adminTokenResponse.data.access_token;
                     // now deleting policy
                     config.method = 'delete';
@@ -492,7 +492,7 @@ class NodeAdapter {
                     delete config.headers['Content-Type'];
                     config.headers.Authorization = 'Bearer ' + token;
                     try {
-                        let deletePolicy = await requestController.httpRequest(config, Boolean(10 > 11));
+                        let deletePolicy = await requestController.httpRequest(config, false);
                         resolve(deletePolicy);
                     } catch (error) {
                         reject(error);
