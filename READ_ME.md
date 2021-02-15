@@ -35,8 +35,8 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 Each function returns a promise so
 
 ```
-keycloak.userAuthentication('agent1', 'agent1').then((e) => {
-    console.log(e;
+keycloak.userAuthentication('agent1', 'agent1','cim').then((e) => {
+    console.log(e);
 }).catch((er) => {
     console.log(er);
 });
@@ -52,8 +52,8 @@ Sample file is given below:
   "CLIENT_ID": "enter client-name",
   "CLIENT_SECRET": "enter client-secret",
   "CLIENT_DB_ID": "enter client-db-id",
-  "USERNAME_ADMIN": "_any user in realm with all roles_",
-  "PASSWORD_ADMIN": "_any user in realm with all roles_",
+  "USERNAME_ADMIN": "_any user in realm with realm-management roles_",
+  "PASSWORD_ADMIN": "_any user in realm with realm-management roles_",
   "SCOPE_NAME": "Any deafult scope"
   
   "GRANT_TYPE": "password",
