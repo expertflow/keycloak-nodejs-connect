@@ -28,7 +28,7 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 ### Example
 
 ```
-  let Keycloak = require("./index");
+  let Keycloak = require("keycloak-nodejs-connect");
   let keycloak= Keycloak.NodeAdapter;
 ```
 
