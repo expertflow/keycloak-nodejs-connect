@@ -10,7 +10,7 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 
 ### Installation 
 ```javascript
- npm install keycloak_adapter
+ npm install keycloak-nodejs-connect
  ```
  
 ## Usage
@@ -28,7 +28,7 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 ### Example
 
 ```
-  let Keycloak = require("keycloak_adapter");
+  let Keycloak = require("./index");
   let keycloak= Keycloak.NodeAdapter;
 ```
 
@@ -46,23 +46,26 @@ You need to have a __keycloak.json file__ in the _root_ directory which contains
 Sample file is given below:
 
 ```{
-  "HOST": "enter host name",
-  "PORT": "enter port number",
-  "REALM": "enter realm name",
-  "CLIENT_ID": "enter client-name",
-  "CLIENT_SECRET": "enter client-secret",
-  "CLIENT_DB_ID": "enter client-db-id",
-  "USERNAME_ADMIN": "_any user in realm with realm-management roles_",
-  "PASSWORD_ADMIN": "_any user in realm with realm-management roles_",
-  "SCOPE_NAME": "Any deafult scope"
-  
+  {
+  "HOST": "http://192.168.1.204",
+  "PORT": "8080",
+  "CLIENT_ID": "unified-admin",
+  "CLIENT_SECRET": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222",
+  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
   "GRANT_TYPE": "password",
-  "ssl-required": "external",
-  "verify-token-audience": true,
-  "confidential-port": 0,
-  "policy-enforcer": {},
+  "REALM": "cim",
   "GRANT_TYPE_PAT": "client_credentials",
- 
+  "USERNAME_ADMIN": "uadmin",
+  "PASSWORD_ADMIN": "uadmin",
+  "SCOPE_NAME": "Any deafult scope",
+  "ssl-required": "external",
+  "resource": "unified-admin",
+  "verify-token-audience": false,
+  "use-resource-role-mappings": true,
+  "confidential-port": 0,
+  "policy-enforcer": {}
+}
+
 }
 ```
 __Functions Description__

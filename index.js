@@ -1,17 +1,7 @@
-var express = require('express');
-const requestController = require("./controller/requestController.js");
-const env = require("../../keycloak.json");
-var bodyParser = require('body-parser');
-var app = express();
-const qs = require('querystring');
-const { Interface } = require('readline');
+var requestController = require("./controller/requestController.js");
+const env = require("./keycloak.json");
 
-app.use(bodyParser.urlencoded({
-    extended: true
-}));
-app.use(bodyParser.json());
 class NodeAdapter {
-
     constructor() { }
 // this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
     getUsersByRole(keycloak_roles) {
@@ -112,6 +102,7 @@ class NodeAdapter {
                     grant_type: env.GRANT_TYPE,
                 },
             };
+            //console.log(config);
             try {
                 //  T.O.K.E.N   R.E.Q.U.E.S.T   # 1   ( P.E.R.M.I.S.S.I.O.N.S   N.O.T    I.N.C.L.U.D.E.D) 
                 let tokenResponse = await requestController.httpRequest(config, true);
@@ -509,4 +500,5 @@ class NodeAdapter {
         });
     }
 }
+// module.exports.Keycloak= new Keycloak;
 module.exports.NodeAdapter = new NodeAdapter;
