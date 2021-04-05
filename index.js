@@ -152,8 +152,8 @@ class NodeAdapter {
                                                     'Resources': intrsopectionResponse.data.authorization.permissions
                                                 },
                                                 'roles': intrsopectionResponse.data.realm_access.roles,
-                                                'realm': realm_name
-
+                                                'realm': realm_name,
+                                                'rpt-token': rptResponse.data.access_token
                                             };
                                             let finalObject={
                                                 'token': userToken,
