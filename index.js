@@ -1,13 +1,28 @@
+var session = require("express-session");
+var Keycloak = require("keycloak-connect");
 var requestController = require("./controller/requestController.js");
-const env = require("./keycloak.json");
+//const env = require("../../keycloak.json");
+var memory = new session.MemoryStore();
+var keycloak = undefined;
+var keycloakConfig = null;
+class NodeAdapter extends Keycloak {
 
-class NodeAdapter {
-    constructor() { }
-// this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
-    getUsersByRole(keycloak_roles) {
+
+    constructor(config) {
+        keycloakConfig =  {...config};
+
+        super({ store: memory }, keycloakConfig);   //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
+
+        this.keycloakConfig = config;
+
+        //console.log("Adapter Intialized: ", keycloakConfig.HOST)
+    }
+
+    // this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
+    getUsersByRole = function getUsersByRole(keycloak_roles) {
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = env.HOST + ':' + env.PORT + '/auth/realms/master/protocol/openid-connect/token'
+            var URL = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/master/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -20,7 +35,7 @@ class NodeAdapter {
                     username: 'admin',
                     password: 'admin',
                     client_id: 'admin-cli',
-                    grant_type: process.env.GRANT_TYPE || 'password',
+                    grant_type: keycloakConfig.GRANT_TYPE || 'password',
                 },
             };
             try {
@@ -35,10 +50,10 @@ class NodeAdapter {
                     let count = 0;
                     let flag = true;
                     let obj = [];  // final object to be returned
-                    let rolesCount=0;
+                    let rolesCount = 0;
                     for (let i = 0; i < keycloak_roles.length; i++) {
                         try {
-                            config.url = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/roles/' + keycloak_roles[i] + '/users'
+                            config.url = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + keycloakConfig.REALM + '/roles/' + keycloak_roles[i] + '/users'
                             let getUsersfromRoles = await requestController.httpRequest(config, true);
                             userObject = getUsersfromRoles.data;
                             for (let check = 0; check < userObject.length; check++) {
@@ -57,9 +72,9 @@ class NodeAdapter {
                                         'lastName': userObject[check].lastName,
                                         'roles': [keycloak_roles[i]]
                                     }
-                                    if(obj[count].firstName == undefined){
-                                        obj[count].firstName="";
-                                        obj[count].lastName="";
+                                    if (obj[count].firstName == undefined) {
+                                        obj[count].firstName = "";
+                                        obj[count].lastName = "";
                                     }
                                     count = count + 1;
                                 }
@@ -80,12 +95,12 @@ class NodeAdapter {
             }
         });
     }
-// this function requires an Admin user in keycloak.json having realm-management roles
-    authenticateUserViaKeycloak(user_name, user_password,realm_name) {
+    // this function requires an Admin user in keycloak.json having realm-management roles
+    authenticateUserViaKeycloak(user_name, user_password, realm_name) {
 
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = env.HOST + ':' + env.PORT + '/auth/realms/' + realm_name + '/protocol/openid-connect/token'
+            var URL = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + realm_name + '/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -97,9 +112,9 @@ class NodeAdapter {
                 data: {
                     username: user_name,
                     password: user_password,
-                    client_id: env.CLIENT_ID,
-                    client_secret: env.CLIENT_SECRET,
-                    grant_type: env.GRANT_TYPE,
+                    client_id: keycloakConfig.CLIENT_ID,
+                    client_secret: keycloakConfig.CLIENT_SECRET,
+                    grant_type: keycloakConfig.GRANT_TYPE,
                 },
             };
             //console.log(config);
@@ -109,7 +124,7 @@ class NodeAdapter {
                 if (tokenResponse.data.access_token) {
                     token = tokenResponse.data.access_token;
                     config.data.grant_type = 'urn:ietf:params:oauth:grant-type:uma-ticket';
-                    config.data.audience = env.CLIENT_ID;
+                    config.data.audience = keycloakConfig.CLIENT_ID;
                     config.headers.Authorization = "Bearer " + token;
                     //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)                 
                     try {
@@ -117,7 +132,7 @@ class NodeAdapter {
                         if (rptResponse.data.access_token) {
                             token = rptResponse.data.access_token;
                             var userToken = token;
-                            config.data.grant_type = env.GRANT_TYPE;
+                            config.data.grant_type = keycloakConfig.GRANT_TYPE;
                             config.data.token = token;
                             URL = URL + '/introspect'
                             config.url = URL;
@@ -128,9 +143,9 @@ class NodeAdapter {
                                 intrsopectionResponse.data.access_token = token;
                                 //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N) 
                                 try {
-                                    config.data.username = env.USERNAME_ADMIN;
-                                    config.data.password = env.PASSWORD_ADMIN;
-                                    config.url = env.HOST + ':' + env.PORT + '/auth/realms/' + realm_name + '/protocol/openid-connect/token';
+                                    config.data.username = keycloakConfig.USERNAME_ADMIN;
+                                    config.data.password = keycloakConfig.PASSWORD_ADMIN;
+                                    config.url = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + realm_name + '/protocol/openid-connect/token';
                                     delete config.data.audience;
                                     delete config.data.token;
                                     delete config.headers.Authorization;
@@ -140,7 +155,7 @@ class NodeAdapter {
                                         try {
                                             config.headers.Authorization = "Bearer " + token;
                                             config.method = 'get';
-                                            config.url = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + realm_name + '/users?username=' + user_name;
+                                            config.url = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + realm_name + '/users?username=' + user_name;
                                             delete config.data;
                                             let getuserDetails = await requestController.httpRequest(config, true);
                                             let responseObject = {
@@ -152,12 +167,12 @@ class NodeAdapter {
                                                     'Resources': intrsopectionResponse.data.authorization.permissions
                                                 },
                                                 'roles': intrsopectionResponse.data.realm_access.roles,
-                                                'realm': realm_name,
-                                                'rpt-token': rptResponse.data.access_token
+                                                'realm': realm_name
+
                                             };
-                                            let finalObject={
+                                            let finalObject = {
                                                 'token': userToken,
-                                                'keycloak_User' :responseObject
+                                                'keycloak_User': responseObject
                                             }
                                             resolve(finalObject);
 
@@ -195,10 +210,10 @@ class NodeAdapter {
         });
     }
 
-    createResource(resource_name, resource_scope = env.SCOPE_NAME) {
+    createResource(resource_name, resource_scope = keycloakConfig.SCOPE_NAME) {
         return new Promise(async (resolve, reject) => {
 
-            var URL = env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
+            var URL = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + keycloakConfig.REALM + '/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -208,9 +223,9 @@ class NodeAdapter {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
                 data: {
-                    client_id: env.CLIENT_ID,
-                    client_secret: env.CLIENT_SECRET,
-                    grant_type: env.GRANT_TYPE_PAT
+                    client_id: keycloakConfig.CLIENT_ID,
+                    client_secret: keycloakConfig.CLIENT_SECRET,
+                    grant_type: keycloakConfig.GRANT_TYPE_PAT
                 },
             };
             //  P.A.T   T.O.K.E.N   R.E.Q.U.E.S.T   # 1     
@@ -227,7 +242,7 @@ class NodeAdapter {
                     config.data._id = resource_name;
                     config.data.resource_scopes = [resource_scope];
 
-                    config.url = env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/authz/protection/resource_set';
+                    config.url = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + keycloakConfig.REALM + '/authz/protection/resource_set';
                     config.headers.Authorization = "Bearer " + token;
                     config.headers['Content-Type'] = 'application/json';
 
@@ -249,7 +264,7 @@ class NodeAdapter {
     deleteResource(resource_name) {
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token';
+            var URL = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + keycloakConfig.REALM + '/protocol/openid-connect/token';
             let config = {
                 method: 'post',
                 url: URL,
@@ -259,9 +274,9 @@ class NodeAdapter {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
                 data: {
-                    client_id: env.CLIENT_ID,
-                    client_secret: env.CLIENT_SECRET,
-                    grant_type: env.GRANT_TYPE_PAT
+                    client_id: keycloakConfig.CLIENT_ID,
+                    client_secret: keycloakConfig.CLIENT_SECRET,
+                    grant_type: keycloakConfig.GRANT_TYPE_PAT
                 },
             };
             //  P.A.T   T.O.K.E.N   R.E.Q.U.E.S.T   # 1      
@@ -270,7 +285,7 @@ class NodeAdapter {
                 if (patToken.data.access_token) {
                     token = patToken.data.access_token;
                     //  D.E.L.E.T.E    R.E.S.O.U.R.C.E  A.N.D   P.E.R.M.I.S.S.I.O.N   R.E.Q.U.E.S.T   
-                    let URL1 = env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/authz/protection/resource_set/' + resource_name;
+                    let URL1 = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + keycloakConfig.REALM + '/authz/protection/resource_set/' + resource_name;
                     config.url = URL1;
                     config.method = 'delete';
                     config.headers.Authorization = 'Bearer ' + token;
@@ -283,18 +298,18 @@ class NodeAdapter {
                         config.method = 'post';
                         config.url = URL;
                         delete config.headers["Authorization"];
-                        config.data.client_id = env.CLIENT_ID;
-                        config.data.username = env.USERNAME_ADMIN;
-                        config.data.password = env.PASSWORD_ADMIN;
-                        config.data.grant_type = env.GRANT_TYPE;
-                        config.data.client_secret = env.CLIENT_SECRET;
+                        config.data.client_id = keycloakConfig.CLIENT_ID;
+                        config.data.username = keycloakConfig.USERNAME_ADMIN;
+                        config.data.password = keycloakConfig.PASSWORD_ADMIN;
+                        config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                        config.data.client_secret = keycloakConfig.CLIENT_SECRET;
                         try {
                             let adminTokenResponse = await requestController.httpRequest(config, true);
                             token = adminTokenResponse.data.access_token;
                             // now deleting policy
                             config.method = 'delete';
                             delete config.data;
-                            let URL6 = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                            let URL6 = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + keycloakConfig.REALM + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
                             config.url = URL6;
                             delete config.headers['Accept'];
                             delete config.headers['cache-control'];
@@ -325,7 +340,7 @@ class NodeAdapter {
             let token;
             var userPolicyName = resource_name + "-policy";
             var resource_permissions = resource_name + "-permission";
-            var URL = env.HOST + ':' + env.PORT + '/auth/realms/' + env.REALM + '/protocol/openid-connect/token'
+            var URL = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/realms/' + keycloakConfig.REALM + '/protocol/openid-connect/token'
             var config = {
                 method: 'post',
                 url: URL,
@@ -335,11 +350,11 @@ class NodeAdapter {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
                 data: {
-                    client_id: env.CLIENT_ID,
-                    username: env.USERNAME_ADMIN,
-                    password: env.PASSWORD_ADMIN,
-                    grant_type: env.GRANT_TYPE,
-                    client_secret: env.CLIENT_SECRET
+                    client_id: keycloakConfig.CLIENT_ID,
+                    username: keycloakConfig.USERNAME_ADMIN,
+                    password: keycloakConfig.PASSWORD_ADMIN,
+                    grant_type: keycloakConfig.GRANT_TYPE,
+                    client_secret: keycloakConfig.CLIENT_SECRET
                 }
             };
             try {
@@ -347,7 +362,7 @@ class NodeAdapter {
                 token = adminTokenResponse.data.access_token;
                 //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
-                let URL3 = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user';
+                let URL3 = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + keycloakConfig.REALM + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user';
                 config.url = URL3;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token;
@@ -374,7 +389,7 @@ class NodeAdapter {
                     config.data.resources = [resource_name];
                     delete config.data["users"];
                     config.data = JSON.stringify(config.data);
-                    let URL4 = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
+                    let URL4 = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + keycloakConfig.REALM + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
                     config.url = URL4;
                     try {
                         let permissionResponse = await requestController.httpRequest(config, false);
@@ -403,11 +418,11 @@ class NodeAdapter {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
                 data: {
-                    client_id: env.CLIENT_ID,
-                    username: env.USERNAME_ADMIN,
-                    password: env.PASSWORD_ADMIN,
-                    grant_type: env.GRANT_TYPE,
-                    client_secret: env.CLIENT_SECRET
+                    client_id: keycloakConfig.CLIENT_ID,
+                    username: keycloakConfig.USERNAME_ADMIN,
+                    password: keycloakConfig.PASSWORD_ADMIN,
+                    grant_type: keycloakConfig.GRANT_TYPE,
+                    client_secret: keycloakConfig.CLIENT_SECRET
                 }
             };
             try {
@@ -416,10 +431,10 @@ class NodeAdapter {
                 // EVALUATION REQUEST
                 var data = JSON.stringify({
                     "resources": [{ "_id": resource_name }],
-                    "clientId": env.CLIENT_DB_ID,
+                    "clientId": keycloakConfig.CLIENT_DB_ID,
                     "userId": keycloak_user_id
                 });
-                config.data.clientId = env.CLIENT_DB_ID;
+                config.data.clientId = keycloakConfig.CLIENT_DB_ID;
                 config.data.resources = [{ "_id": resource_name }];
                 config.data.userId = keycloak_user_id;
                 delete config.data["username"];
@@ -427,7 +442,7 @@ class NodeAdapter {
                 delete config.data["grant_type"];
                 delete config.data["client_secret"];
                 delete config.data["client_id"];
-                let URL5 = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
+                let URL5 = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + keycloakConfig.REALM + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
                 config.url = URL5;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token,
@@ -463,11 +478,11 @@ class NodeAdapter {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     data: {
-                        client_id: env.CLIENT_ID,
-                        username: env.USERNAME_ADMIN,
-                        password: env.PASSWORD_ADMIN,
-                        grant_type: env.GRANT_TYPE,
-                        client_secret: env.CLIENT_SECRET
+                        client_id: keycloakConfig.CLIENT_ID,
+                        username: keycloakConfig.USERNAME_ADMIN,
+                        password: keycloakConfig.PASSWORD_ADMIN,
+                        grant_type: keycloakConfig.GRANT_TYPE,
+                        client_secret: keycloakConfig.CLIENT_SECRET
                     }
                 };
                 try {
@@ -476,7 +491,7 @@ class NodeAdapter {
                     // now deleting policy
                     config.method = 'delete';
                     delete config.data;
-                    let URL6 = env.HOST + ':' + env.PORT + '/auth/admin/realms/' + env.REALM + '/clients/' + env.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                    let URL6 = keycloakConfig.HOST + ':' + keycloakConfig.PORT + '/auth/admin/realms/' + keycloakConfig.REALM + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
                     config.url = URL6;
                     delete config.headers['Accept'];
                     delete config.headers['cache-control'];
@@ -500,5 +515,4 @@ class NodeAdapter {
         });
     }
 }
-// module.exports.Keycloak= new Keycloak;
-module.exports.NodeAdapter = new NodeAdapter;
+module.exports = { NodeAdapter };

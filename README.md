@@ -28,8 +28,13 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 ### Example
 
 ```
-  let Keycloak = require("keycloak-nodejs-connect");
-  let keycloak= Keycloak.NodeAdapter;
+  var {NodeAdapter} = require("keycloak-nodejs-connect");
+
+  var config = {
+    // fill with Keycloak.json key value pairs.
+  };
+  const keycloak = new NodeAdapter(config)
+
 ```
 
 Each function returns a promise so
@@ -45,28 +50,66 @@ keycloak.userAuthentication('agent1', 'agent1','cim').then((e) => {
 You need to have a __keycloak.json file__ in the _root_ directory which contains all the configurations.
 Sample file is given below:
 
-```{
-  {
-  "HOST": "http://192.168.1.204",
-  "PORT": "8080",
-  "CLIENT_ID": "unified-admin",
-  "CLIENT_SECRET": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222",
-  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
-  "GRANT_TYPE": "password",
-  "REALM": "cim",
-  "GRANT_TYPE_PAT": "client_credentials",
-  "USERNAME_ADMIN": "uadmin",
-  "PASSWORD_ADMIN": "uadmin",
-  "SCOPE_NAME": "Any deafult scope",
-  "ssl-required": "external",
-  "resource": "unified-admin",
-  "verify-token-audience": false,
-  "use-resource-role-mappings": true,
-  "confidential-port": 0,
-  "policy-enforcer": {}
-}
+```
+    "realm": "cim",
+    "auth-server-url": "https://keycloak.ucce.ipcc/auth/",
+    "ssl-required": "external",
+    "resource": "unified-admin",
+    "verify-token-audience": false,
+    "credentials": {
+      "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
+    },
+    "use-resource-role-mappings": true,
+    "confidential-port": 0,
+    "policy-enforcer": {},
+    "HOST": "http://192.168.1.204",
+    "PORT": "8080",
+    "CLIENT_ID": "unified-admin",
+    "CLIENT_SECRET": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222",
+    "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+    "GRANT_TYPE": "password",
+    "REALM": "cim",
+    "GRANT_TYPE_PAT": "client_credentials",
+    "USERNAME_ADMIN": "uadmin",
+    "PASSWORD_ADMIN": "uadmin",
+    "SCOPE_NAME": "Any deafult scope",
+    "bearer-only":true
+```
 
-}
+
+```
+For using keycloak-connect features 
+
+var express = require('express');
+var app = express();
+var session = require('express-session');
+var memoryStore = new session.MemoryStore();
+
+app.use(session({
+    secret: 'secret1',
+    resave: false,
+    saveUninitialized: true,
+    store: memoryStore
+}));
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0
+
+app.get('/', (req, res) => {
+    console.log('Heloo - - -- - ');
+    res.send('Heloo - - -- - ');
+});
+
+app.get('/home', keycloak.protect(), (req, res) => {
+    console.log('Home accessed..');
+    res.send('Welcome to Home');
+});
+var server = app.listen(3000, function () {
+    // var host = server.address().address
+    // var port = server.address().port
+    console.log(`Example app listening at http://%s:%s`)
+})
+
+
 ```
 __Functions Description__
 
