@@ -40,10 +40,10 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 Each function returns a promise so
 
 ```
-keycloak.userAuthentication('agent1', 'agent1','cim').then((e) => {
-    console.log(e);
+keycloak.authenticateUserViaKeycloak('admin', 'admin','cim').then((e) => {
+    console.log("result :" + (e));
 }).catch((er) => {
-    console.log(er);
+    console.log("reject error : " + er);
 });
 ```
 
