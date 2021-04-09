@@ -50,25 +50,25 @@ Sample file is given below:
 
 ```
 {
-    "realm": "cim",
-    "auth-server-url": "http://192.168.1.204:8080/auth/",
-    "ssl-required": "external",
-    "resource": "unified-admin",
-    "verify-token-audience": false,
-    "credentials": {
-      "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
-    },
-    "use-resource-role-mappings": true,
-    "confidential-port": 0,
-    "policy-enforcer": {},
-    "CLIENT_ID": "unified-admin",
-    "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
-    "GRANT_TYPE": "password",
-    "GRANT_TYPE_PAT": "client_credentials",
-    "USERNAME_ADMIN": "uadmin",
-    "PASSWORD_ADMIN": "uadmin",
-    "SCOPE_NAME": "Any deafult scope",
-    "bearer-only":true
+  "realm": "cim",
+  "auth-server-url": "http://192.168.1.204:8080/auth/",
+  "ssl-required": "external",
+  "resource": "unified-admin",
+  "verify-token-audience": false,
+  "credentials": {
+    "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
+  },
+  "use-resource-role-mappings": true,
+  "confidential-port": 0,
+  "policy-enforcer": {},
+  "CLIENT_ID": "unified-admin",
+  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+  "GRANT_TYPE": "password",
+  "GRANT_TYPE_PAT": "client_credentials",
+  "USERNAME_ADMIN": "uadmin",
+  "PASSWORD_ADMIN": "uadmin",
+  "SCOPE_NAME": "Any deafult scope",
+  "bearer-only":true
 }
 ```
 
@@ -90,19 +90,16 @@ app.use(session({
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0    // to disable https
 
+app.use( keycloak.middleware({ logout: '/logout' }))
+
 app.get('/', (req, res) => {
     console.log('Heloo - - -- - ');
     res.send('Heloo - - -- - ');
 });
 
-app.get('/home', keycloak.protect(), (req, res) => {        
+app.get('/home', keycloak.protect(), (req, res) => {
     console.log('Home accessed..');
     res.send('Welcome to Home');
-});
-
-app.get( '/user', keycloak.protect('realm:app-user'),(req,res) => {
-    console.log("special accessed")
-    res.send("User with 'user' role authorized")
 });
 
 app.get( '/notdefined', keycloak.protect('realm:app-user'),(req,res) => {
