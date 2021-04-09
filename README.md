@@ -50,26 +50,25 @@ Sample file is given below:
 
 ```
 {
-  "realm": "cim",
-  "auth-server-url": "http://192.168.1.204:8080",
-  "ssl-required": "external",
-  "resource": "unified-admin",
-  "verify-token-audience": false,
-  "credentials": {
-    "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
-  },
-  "use-resource-role-mappings": true,
-  "confidential-port": 0,
-  "policy-enforcer": {},
-  
-  "CLIENT_ID": "unified-admin",
-  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
-  "GRANT_TYPE": "password",
-  "GRANT_TYPE_PAT": "client_credentials",
-  "USERNAME_ADMIN": "uadmin",
-  "PASSWORD_ADMIN": "uadmin",
-  "SCOPE_NAME": "Any deafult scope",
-  "bearer-only":true
+    "realm": "cim",
+    "auth-server-url": "http://192.168.1.204:8080/auth/",
+    "ssl-required": "external",
+    "resource": "unified-admin",
+    "verify-token-audience": false,
+    "credentials": {
+      "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
+    },
+    "use-resource-role-mappings": true,
+    "confidential-port": 0,
+    "policy-enforcer": {},
+    "CLIENT_ID": "unified-admin",
+    "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+    "GRANT_TYPE": "password",
+    "GRANT_TYPE_PAT": "client_credentials",
+    "USERNAME_ADMIN": "uadmin",
+    "PASSWORD_ADMIN": "uadmin",
+    "SCOPE_NAME": "Any deafult scope",
+    "bearer-only":true
 }
 ```
 
@@ -117,7 +116,7 @@ app.get('/amq', keycloak.enforcer(['amq:view-amq'], {
     console.log("not defined")
     res.send("AMQ settings resource accessed")
  });
- 
+
  app.post('/amq', keycloak.enforcer(['amq:create-amq'], {
     resource_server_id: 'unified-admin'
   }), function (req, res) {
