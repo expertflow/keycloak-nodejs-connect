@@ -14,7 +14,9 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
  ```
  
 ## Usage
-
+```
+This adapter is extended from keycloak-connect and have functionalities of both adapters.
+```
 ### Functions
 ```
  authenticateUserViaKeycloak
@@ -29,11 +31,7 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 
 ```
   var {NodeAdapter} = require("keycloak-nodejs-connect");
-
-  var config = {
-    // fill with Keycloak.json key value pairs.
-  };
-  const keycloak = new NodeAdapter(config)
+  const keycloak = new NodeAdapter()
 
 ```
 
@@ -47,33 +45,32 @@ keycloak.authenticateUserViaKeycloak('admin', 'admin','cim').then((e) => {
 });
 ```
 
-You need to have a __keycloak.json file__ in the _root_ directory which contains all the configurations.
+You need to have a config.json file__ in the _root_ directory which contains all the configurations.
 Sample file is given below:
 
 ```
-    "realm": "cim",
-    "auth-server-url": "https://keycloak.ucce.ipcc/auth/",
-    "ssl-required": "external",
-    "resource": "unified-admin",
-    "verify-token-audience": false,
-    "credentials": {
-      "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
-    },
-    "use-resource-role-mappings": true,
-    "confidential-port": 0,
-    "policy-enforcer": {},
-    "HOST": "http://192.168.1.204",
-    "PORT": "8080",
-    "CLIENT_ID": "unified-admin",
-    "CLIENT_SECRET": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222",
-    "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
-    "GRANT_TYPE": "password",
-    "REALM": "cim",
-    "GRANT_TYPE_PAT": "client_credentials",
-    "USERNAME_ADMIN": "uadmin",
-    "PASSWORD_ADMIN": "uadmin",
-    "SCOPE_NAME": "Any deafult scope",
-    "bearer-only":true
+{
+  "realm": "cim",
+  "auth-server-url": "http://192.168.1.204:8080",
+  "ssl-required": "external",
+  "resource": "unified-admin",
+  "verify-token-audience": false,
+  "credentials": {
+    "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
+  },
+  "use-resource-role-mappings": true,
+  "confidential-port": 0,
+  "policy-enforcer": {},
+  
+  "CLIENT_ID": "unified-admin",
+  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+  "GRANT_TYPE": "password",
+  "GRANT_TYPE_PAT": "client_credentials",
+  "USERNAME_ADMIN": "uadmin",
+  "PASSWORD_ADMIN": "uadmin",
+  "SCOPE_NAME": "Any deafult scope",
+  "bearer-only":true
+}
 ```
 
 
@@ -92,17 +89,42 @@ app.use(session({
     store: memoryStore
 }));
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0    // to disable https
 
 app.get('/', (req, res) => {
     console.log('Heloo - - -- - ');
     res.send('Heloo - - -- - ');
 });
 
-app.get('/home', keycloak.protect(), (req, res) => {
+app.get('/home', keycloak.protect(), (req, res) => {        
     console.log('Home accessed..');
     res.send('Welcome to Home');
 });
+
+app.get( '/user', keycloak.protect('realm:app-user'),(req,res) => {
+    console.log("special accessed")
+    res.send("User with 'user' role authorized")
+});
+
+app.get( '/notdefined', keycloak.protect('realm:app-user'),(req,res) => {
+    console.log("not defined")
+    res.send("This resource is not defined in keycloak. User with app-user role can access this API")
+});
+
+app.get('/amq', keycloak.enforcer(['amq:view-amq'], {
+    resource_server_id: 'unified-admin'
+  }), function (req, res) {
+    console.log("not defined")
+    res.send("AMQ settings resource accessed")
+ });
+ 
+ app.post('/amq', keycloak.enforcer(['amq:create-amq'], {
+    resource_server_id: 'unified-admin'
+  }), function (req, res) {
+    console.log("not defined")
+    res.send("AMQ settings resource accessed")
+ });
+
 var server = app.listen(3000, function () {
     // var host = server.address().address
     // var port = server.address().port
