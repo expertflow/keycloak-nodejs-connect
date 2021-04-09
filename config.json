@@ -1,6 +1,6 @@
 {
   "realm": "cim",
-  "auth-server-url": "http://192.168.1.204:8080",
+  "auth-server-url": "http://192.168.1.204:8080/auth/",
   "ssl-required": "external",
   "resource": "unified-admin",
   "verify-token-audience": false,
@@ -10,7 +10,6 @@
   "use-resource-role-mappings": true,
   "confidential-port": 0,
   "policy-enforcer": {},
-  
   "CLIENT_ID": "unified-admin",
   "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
   "GRANT_TYPE": "password",

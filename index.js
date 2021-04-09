@@ -1,21 +1,23 @@
 var session = require("express-session");
 var Keycloak = require("keycloak-connect");
 var requestController = require("./controller/requestController.js");
-const config = require("../../config.json");
+var config = require("../../config.json");
 var memory = new session.MemoryStore();
 var keycloakConfig = null;
 class NodeAdapter extends Keycloak {
-
-constructor() {
+    constructor() {
         keycloakConfig =  {...config};
+
         super({ store: memory }, keycloakConfig);   //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
+
+       // this.keycloakConfig = config;
     }
 
     // this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
     getUsersByRole = function getUsersByRole(keycloak_roles) {
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = keycloakConfig["auth-server-url"] + '/auth/realms/master/protocol/openid-connect/token'
+            var URL = keycloakConfig["auth-server-url"] + 'realms/master/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -46,7 +48,7 @@ constructor() {
                     let rolesCount = 0;
                     for (let i = 0; i < keycloak_roles.length; i++) {
                         try {
-                            config.url = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + keycloakConfig.realm + '/roles/' + keycloak_roles[i] + '/users'
+                            config.url = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/roles/' + keycloak_roles[i] + '/users'
                             let getUsersfromRoles = await requestController.httpRequest(config, true);
                             userObject = getUsersfromRoles.data;
                             for (let check = 0; check < userObject.length; check++) {
@@ -93,7 +95,8 @@ constructor() {
 
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = keycloakConfig["auth-server-url"] + '/auth/realms/' + realm_name + '/protocol/openid-connect/token'
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + realm_name + '/protocol/openid-connect/token'
+            //keycloakConfig["auth-server-url"] +'realms
             let config = {
                 method: 'post',
                 url: URL,
@@ -138,7 +141,7 @@ constructor() {
                                 try {
                                     config.data.username = keycloakConfig.USERNAME_ADMIN;
                                     config.data.password = keycloakConfig.PASSWORD_ADMIN;
-                                    config.url = keycloakConfig["auth-server-url"] + '/auth/realms/' + realm_name + '/protocol/openid-connect/token';
+                                    config.url = keycloakConfig["auth-server-url"] + 'realms/' + realm_name + '/protocol/openid-connect/token';
                                     delete config.data.audience;
                                     delete config.data.token;
                                     delete config.headers.Authorization;
@@ -148,7 +151,7 @@ constructor() {
                                         try {
                                             config.headers.Authorization = "Bearer " + token;
                                             config.method = 'get';
-                                            config.url = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + realm_name + '/users?username=' + user_name;
+                                            config.url = keycloakConfig["auth-server-url"] + 'admin/realms/' + realm_name + '/users?username=' + user_name;
                                             delete config.data;
                                             let getuserDetails = await requestController.httpRequest(config, true);
                                             let responseObject = {
@@ -206,7 +209,7 @@ constructor() {
     createResource(resource_name, resource_scope = keycloakConfig.SCOPE_NAME) {
         return new Promise(async (resolve, reject) => {
 
-            var URL = keycloakConfig["auth-server-url"] + '/auth/realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
             let config = {
                 method: 'post',
                 url: URL,
@@ -235,7 +238,7 @@ constructor() {
                     config.data._id = resource_name;
                     config.data.resource_scopes = [resource_scope];
 
-                    config.url = keycloakConfig["auth-server-url"] + '/auth/realms/' + keycloakConfig.realm + '/authz/protection/resource_set';
+                    config.url = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/authz/protection/resource_set';
                     config.headers.Authorization = "Bearer " + token;
                     config.headers['Content-Type'] = 'application/json';
 
@@ -257,7 +260,7 @@ constructor() {
     deleteResource(resource_name) {
         return new Promise(async (resolve, reject) => {
             let token;
-            var URL = keycloakConfig["auth-server-url"] + '/auth/realms/' + keycloakConfig.realm + '/protocol/openid-connect/token';
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token';
             let config = {
                 method: 'post',
                 url: URL,
@@ -278,7 +281,7 @@ constructor() {
                 if (patToken.data.access_token) {
                     token = patToken.data.access_token;
                     //  D.E.L.E.T.E    R.E.S.O.U.R.C.E  A.N.D   P.E.R.M.I.S.S.I.O.N   R.E.Q.U.E.S.T   
-                    let URL1 = keycloakConfig["auth-server-url"] + '/auth/realms/' + keycloakConfig.realm + '/authz/protection/resource_set/' + resource_name;
+                    let URL1 = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/authz/protection/resource_set/' + resource_name;
                     config.url = URL1;
                     config.method = 'delete';
                     config.headers.Authorization = 'Bearer ' + token;
@@ -302,7 +305,7 @@ constructor() {
                             // now deleting policy
                             config.method = 'delete';
                             delete config.data;
-                            let URL6 = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                            let URL6 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
                             config.url = URL6;
                             delete config.headers['Accept'];
                             delete config.headers['cache-control'];
@@ -333,7 +336,7 @@ constructor() {
             let token;
             var userPolicyName = resource_name + "-policy";
             var resource_permissions = resource_name + "-permission";
-            var URL = keycloakConfig["auth-server-url"] + '/auth/realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
             var config = {
                 method: 'post',
                 url: URL,
@@ -355,7 +358,7 @@ constructor() {
                 token = adminTokenResponse.data.access_token;
                 //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
-                let URL3 = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user';
+                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user';
                 config.url = URL3;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token;
@@ -382,7 +385,7 @@ constructor() {
                     config.data.resources = [resource_name];
                     delete config.data["users"];
                     config.data = JSON.stringify(config.data);
-                    let URL4 = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
+                    let URL4 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
                     config.url = URL4;
                     try {
                         let permissionResponse = await requestController.httpRequest(config, false);
@@ -435,7 +438,7 @@ constructor() {
                 delete config.data["grant_type"];
                 delete config.data["client_secret"];
                 delete config.data["client_id"];
-                let URL5 = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
+                let URL5 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/evaluate';
                 config.url = URL5;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token,
@@ -484,7 +487,7 @@ constructor() {
                     // now deleting policy
                     config.method = 'delete';
                     delete config.data;
-                    let URL6 = keycloakConfig["auth-server-url"] + '/auth/admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
+                    let URL6 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user/' + resource_name + '-policy';
                     config.url = URL6;
                     delete config.headers['Accept'];
                     delete config.headers['cache-control'];
