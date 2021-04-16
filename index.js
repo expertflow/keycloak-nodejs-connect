@@ -1,11 +1,10 @@
 var session = require("express-session");
 var Keycloak = require("keycloak-connect");
 var requestController = require("./controller/requestController.js");
-var config = require("../../config.json");
 var memory = new session.MemoryStore();
 var keycloakConfig = null;
 class NodeAdapter extends Keycloak {
-    constructor() {
+    constructor(config) {
         keycloakConfig =  {...config};
 
         super({ store: memory }, keycloakConfig);   //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
