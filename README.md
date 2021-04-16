@@ -31,7 +31,14 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 
 ```
   var {NodeAdapter} = require("keycloak-nodejs-connect");
-  const keycloak = new NodeAdapter()
+  const keycloak = new NodeAdapter(config)
+
+  ```
+  Note here that `config` object is passed as a parameter to constructor of NodeAdapter class. 
+  You can put all the configuration in a file and them import that file in your application
+  OR
+  You can create an object containing all the configurations and pass it.
+  ```
 
 ```
 
@@ -45,8 +52,7 @@ keycloak.authenticateUserViaKeycloak('admin', 'admin','cim').then((e) => {
 });
 ```
 
-You need to have a config.json file__ in the _root_ directory which contains all the configurations.
-Sample file is given below:
+Sample `config` is given below:
 
 ```
 {
