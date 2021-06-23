@@ -1,6 +1,6 @@
 {
   "name": "keycloak-nodejs-connect",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Node JS keycloak adapter for authentication and authorization.",
   "main": "index.js",
   "scripts": {
