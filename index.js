@@ -62,7 +62,7 @@ class NodeAdapter extends Keycloak {
                                 if (flag == true) {
                                     obj[count] = {
                                         'id': userObject[check].id,
-                                        'userName': userObject[check].username,
+                                        'username': userObject[check].username,
                                         'firstName': userObject[check].firstName,
                                         'lastName': userObject[check].lastName,
                                         'roles': [keycloak_roles[i]]
