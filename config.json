@@ -1,21 +1,24 @@
 {
-  "realm": "cim",
-  "auth-server-url": "http://192.168.1.204:8080/auth/",
+  "realm": "Vrs",
+  "auth-server-url": "http://192.168.1.124:8088/auth/",
   "ssl-required": "external",
-  "resource": "unified-admin",
-  "verify-token-audience": false,
+  "resource": "CIM",
+  "verify-token-audience": true,
   "credentials": {
-    "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
+    "secret": "9595a12f-a8a0-471a-b387-6958cb3316df"
   },
   "use-resource-role-mappings": true,
   "confidential-port": 0,
-  "policy-enforcer": {},
-  "CLIENT_ID": "unified-admin",
-  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+  "policy-enforcer": {
+    "policyEnforcementMode": "ENFORCING"
+  },
+  "decisionStrategy": "UNANIMOUS",
+  "CLIENT_ID": "CIM",
+  "CLIENT_DB_ID": "46473fcb-279f-4b87-a9b9-e0b3486f97d4",
   "GRANT_TYPE": "password",
   "GRANT_TYPE_PAT": "client_credentials",
-  "USERNAME_ADMIN": "uadmin",
-  "PASSWORD_ADMIN": "uadmin",
-  "SCOPE_NAME": "Any deafult scope",
-  "bearer-only":true
+  "USERNAME_ADMIN": "admin",
+  "PASSWORD_ADMIN": "admin",
+  "SCOPE_NAME": "view",
+  "bearer-only": true
 }
