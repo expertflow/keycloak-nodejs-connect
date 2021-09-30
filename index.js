@@ -1,20 +1,22 @@
 var session = require("express-session");
 var Keycloak = require("keycloak-connect");
-var requestController = require("./controller/requestController.js");
-var config = require("../../config.json");
+var requestController = require("./controller/requestController");
+var config = require("./config.json");
 var memory = new session.MemoryStore();
 var keycloakConfig = null;
+
 class NodeAdapter extends Keycloak {
+
     constructor() {
-        keycloakConfig =  {...config};
+        keycloakConfig = { ...config };
 
         super({ store: memory }, keycloakConfig);   //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
 
-       // this.keycloakConfig = config;
+        // this.keycloakConfig = config;
     }
 
     // this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
-    getUsersByRole = function getUsersByRole(keycloak_roles) {
+    getUsersByRole(keycloak_roles) {
         return new Promise(async (resolve, reject) => {
             let token;
             var URL = keycloakConfig["auth-server-url"] + 'realms/master/protocol/openid-connect/token'
@@ -29,7 +31,7 @@ class NodeAdapter extends Keycloak {
                 data: {
                     username: 'admin',
                     password: 'admin',
-                    client_id: 'admin-cli',
+                    client_id: 'demo-scope',
                     grant_type: keycloakConfig.GRANT_TYPE || 'password',
                 },
             };
@@ -90,6 +92,7 @@ class NodeAdapter extends Keycloak {
             }
         });
     }
+
     // this function requires an Admin user in keycloak.json having realm-management roles
     authenticateUserViaKeycloak(user_name, user_password, realm_name) {
 
@@ -257,6 +260,7 @@ class NodeAdapter extends Keycloak {
         });
 
     }
+
     deleteResource(resource_name) {
         return new Promise(async (resolve, reject) => {
             let token;
@@ -330,12 +334,10 @@ class NodeAdapter extends Keycloak {
         });
     }
 
-    permitUsertoResource(resource_name, keycloak_user_id) {
+    createPolicy(policyName, roles) {
 
         return new Promise(async (resolve, reject) => {
             let token;
-            var userPolicyName = resource_name + "-policy";
-            var resource_permissions = resource_name + "-permission";
             var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
             var config = {
                 method: 'post',
@@ -354,53 +356,110 @@ class NodeAdapter extends Keycloak {
                 }
             };
             try {
+
                 let adminTokenResponse = await requestController.httpRequest(config, true);
                 token = adminTokenResponse.data.access_token;
+
                 //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
                 //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
-                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/user';
+                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/policy/role';
                 config.url = URL3;
                 config.headers['Content-Type'] = 'application/json';
                 config.headers.Authorization = 'Bearer ' + token;
-                config.data.decisionStrategy = 'UNANIMOUS';
+
+                config.data.decisionStrategy = 'AFFIRMATIVE';
                 config.data.logic = "POSITIVE";
-                config.data.name = userPolicyName;
-                config.data.type = "user";
-                config.data.id = userPolicyName;
-                config.data.users = [keycloak_user_id];
+                config.data.name = policyName;
+                config.data.type = "role";
+                config.data.id = policyName;
+                config.data.roles = roles;
+
                 delete config.data["client_id"];
                 delete config.data["client_secret"];
                 delete config.data["grant_type"];
                 delete config.data["username"];
                 delete config.data["password"];
                 config.data = JSON.stringify(config.data);
+
                 try {
-                    let policyResponse = await requestController.httpRequest(config, false);
-                    config.data = JSON.parse(config.data);
-                    //  A.S.S.O.C.I.A.T.E   P.E.R.M.I.S.S.I.O.N   T.O   A  R.E.S.O.U.R.C.E   ( U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y   I.S  A.S.S.O.C.I.A.T.E.D   T.O    P.E.R.M)  
-                    config.data.name = resource_permissions;
-                    config.data.type = "resource";
-                    config.data.id = resource_permissions;
-                    config.data.policies = [userPolicyName];
-                    config.data.resources = [resource_name];
-                    delete config.data["users"];
-                    config.data = JSON.stringify(config.data);
-                    let URL4 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/permission/resource';
-                    config.url = URL4;
-                    try {
-                        let permissionResponse = await requestController.httpRequest(config, false);
-                        resolve(permissionResponse);
-                    } catch (error) {
-                        reject("Permisssion not created" + error);
-                    }
+                    let policyResponse = await requestController.httpRequest(config,false);
+                    resolve(policyResponse);
                 } catch (error) {
                     reject("Policy error" + error);
                 }
+
             } catch (error) {
                 reject(error);
             }
+
         });
+
     }
+
+    createPermission(resourceName, policyName, permissionName, scopeName){
+
+        return new Promise(async (resolve, reject) => {
+            let token;
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
+            var config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Accept': 'application/json',
+                    'cache-control': 'no-cache',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data: {
+                    client_id: keycloakConfig.CLIENT_ID,
+                    username: keycloakConfig.USERNAME_ADMIN,
+                    password: keycloakConfig.PASSWORD_ADMIN,
+                    grant_type: keycloakConfig.GRANT_TYPE,
+                    client_secret: keycloakConfig.credentials.secret
+                }
+            };
+
+            try {
+                let adminTokenResponse = await requestController.httpRequest(config, true);
+                token = adminTokenResponse.data.access_token;
+                //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
+                //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y  
+                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/clients/' + keycloakConfig.CLIENT_DB_ID + '/authz/resource-server/permission/scope';
+                config.url = URL3;
+                config.headers['Content-Type'] = 'application/json';
+                config.headers.Authorization = 'Bearer ' + token;
+
+                config.data.decisionStrategy = 'AFFIRMATIVE';
+                config.data.logic = "POSITIVE";
+                config.data.name = permissionName;
+                config.data.policies = policyName;
+                config.data.resources = resourceName;
+                config.data.scopes = scopeName;
+                config.data.type = "scope";
+                config.data.id = permissionName;
+
+
+                delete config.data["client_id"];
+                delete config.data["client_secret"];
+                delete config.data["grant_type"];
+                delete config.data["username"];
+                delete config.data["password"];
+                config.data = JSON.stringify(config.data);
+
+                try {
+                    let policyResponse = await requestController.httpRequest(config,false);
+                    resolve(policyResponse);
+                } catch (error) {
+                    reject("Policy error" + error);
+                }
+
+            } catch (error) {
+                reject(error);
+            }
+
+        });
+
+    }
+
     //   R.E.S.O.U.R.C.E    A.U.T.H.O.R.I.Z.A.T.I.O.N        (    E.V.A.L.U.A.T.E    U.S.E.R    T.O   A    R.E.S.O.U.R.C.E   )
     resourceAuthorization(keycloak_user_id, resource_name) {
         return new Promise(async (resolve, reject) => {
@@ -456,7 +515,8 @@ class NodeAdapter extends Keycloak {
             };
         });
     }
-    revokeUseronResource = (resource_name, keycloak_user_id) => {
+
+    revokeUseronResource(resource_name, keycloak_user_id){
         return new Promise(async (resolve, reject) => {
             let token;
             try {
@@ -511,4 +571,5 @@ class NodeAdapter extends Keycloak {
         });
     }
 }
+
 module.exports = { NodeAdapter };
