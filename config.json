@@ -1,24 +1,23 @@
 {
-  "realm": "Vrs",
-  "auth-server-url": "http://192.168.1.124:8088/auth/",
+  "realm": "university",
+  "auth-server-url": "http://192.168.1.204:8080/auth/",
   "ssl-required": "external",
-  "resource": "CIM",
-  "verify-token-audience": true,
+  "resource": "agent-manager",
+  "verify-token-audience": false,
   "credentials": {
-    "secret": "9595a12f-a8a0-471a-b387-6958cb3316df"
+    "secret": "QOJS4gyCMzv09GPs5ik0AvllBM05VIAC"
   },
   "use-resource-role-mappings": true,
   "confidential-port": 0,
-  "policy-enforcer": {
-    "policyEnforcementMode": "ENFORCING"
-  },
-  "decisionStrategy": "UNANIMOUS",
-  "CLIENT_ID": "CIM",
-  "CLIENT_DB_ID": "46473fcb-279f-4b87-a9b9-e0b3486f97d4",
+  "policy-enforcer": {},
+  "CLIENT_ID": "agent-manager",
+  "CLIENT_DB_ID": "QOJS4gyCMzv09GPs5ik0AvllBM05VIAC",
   "GRANT_TYPE": "password",
   "GRANT_TYPE_PAT": "client_credentials",
   "USERNAME_ADMIN": "admin",
   "PASSWORD_ADMIN": "admin",
-  "SCOPE_NAME": "view",
-  "bearer-only": true
+  "SCOPE_NAME": "Any default scope",
+  "bearer-only": true,
+  "finesse-server-url": "https://uccx-morocco.ucce.ipcc:8445",
+  "GROUP": "Agent"
 }
