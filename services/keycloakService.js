@@ -17,6 +17,25 @@ class KeycloakService extends Keycloak{
        // this.keycloakConfig = config;
     }
 
+    //Based on the attributes it either authenticate keycloak user or finesse user.
+    async authenticateUserViaKeycloak(user_name, user_password, realm_name, finesseUrl, userRoles) {
+
+        let token = '';
+
+        // If finesseUrl is empty it means normal keycloak auth is required.
+        if(finesseUrl == ''){
+
+            token = await this.getKeycloakTokenWithIntrospect(user_name, user_password, realm_name);
+            return token;
+
+        }else{
+            // Finesse Auth, takes userRole in argument to create user along with role.
+            token = await this.authenticateFinesse(user_name, user_password, finesseUrl, userRoles)
+            return token;
+        }
+        
+    }
+
     getAccessToken(user_name, user_password){
         
         return new Promise(async (resolve, reject) => {
@@ -53,7 +72,7 @@ class KeycloakService extends Keycloak{
     }
 
     // this function requires an Admin user in keycloak.json having realm-management roles
-    authenticateUserViaKeycloak(user_name, user_password, realm_name) {
+    async getKeycloakTokenWithIntrospect(user_name, user_password, realm_name){
 
         return new Promise(async (resolve, reject) => {
             let token;
@@ -603,23 +622,84 @@ class KeycloakService extends Keycloak{
                     reject("Access Token Request Failed");
                 }
             }
-            catch (er) {
-                reject(er);
+            catch (err) {
+                reject(err);
             }
         });
     }
 
-    /*
-    async getRealmRoles(){
-        
+    
+    async getRealmRoles(adminToken){
+
+        return new Promise(async (resolve, reject) => {
+            
+            let URL = `${keycloakConfig["auth-server-url"]}${keycloakConfig["USERNAME_ADMIN"]}/realms/${keycloakConfig["realm"]}/roles`;
+
+            
+
+            let config = {
+                method: 'get',
+                url: URL,
+                headers: {
+                    'Authorization': `Bearer ${adminToken}`
+                },
+            };
+
+            try {
+
+                let tokenResponse = await requestController.httpRequest(config, false);
+                resolve(tokenResponse);
+
+            }
+            catch (err) {
+                reject({
+                    "status": err.response.status,
+                    "message": err.response.data.error_description
+                });
+            }
+
+        });
     }
 
-    async assignRoleToUser(){
+    
+    
+    async assignRoleToUser(userId, roles, adminToken){
 
+        return new Promise(async (resolve, reject) => {
+            
+            let URL = `${keycloakConfig["auth-server-url"]}${keycloakConfig["USERNAME_ADMIN"]}/realms/${keycloakConfig["realm"]}/users/${userId}/role-mappings/realm`;
+
+            let config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${adminToken}`
+                },
+                data: roles
+            };
+
+            try {
+
+                let tokenResponse = await requestController.httpRequest(config, false);
+                resolve(tokenResponse);
+
+            }
+            catch (err) {
+                reject({
+                    "status": err.response.status,
+                    "message": err.response.data.error_description
+                });
+            }
+
+        });
     }
-    */
+    
 
-    async createUser(username,password,token){
+    async createUser(username,password,token,userRoles){
+
+        let assignRole = [];
+
         return new Promise(async (resolve, reject) => {
             
             let URL = `${keycloakConfig["auth-server-url"]}${keycloakConfig["USERNAME_ADMIN"]}/realms/${keycloakConfig["realm"]}/users`;
@@ -633,8 +713,7 @@ class KeycloakService extends Keycloak{
                         value: password,
                         temporary: false
                     }
-                ],
-                groups: [`${keycloakConfig["GROUP"]}`]
+                ]
             }
 
             
@@ -652,54 +731,140 @@ class KeycloakService extends Keycloak{
             try {
 
                 let tokenResponse = await requestController.httpRequest(config, false);
-                resolve(tokenResponse);
+
+                if(userRoles == ''){
+                    //Get the user id at time of creation
+                    let userLocation = tokenResponse.headers.location;
+                    let userLocationSplit = userLocation.split("/");
+                    let userId = userLocationSplit[(userLocationSplit.length) - 1];
+
+                    
+                    //Get list of all the roles in keycloak realm
+                    let realmRoles = await this.getRealmRoles(token);
+                    
+                    //checking whether role exist in realmRoles object array:
+                    for(let role of realmRoles.data){
+                        
+                        userRoles.forEach(userRole => {
+
+                            if(role.name == userRole.toLocaleLowerCase()){
+                                assignRole.push({
+                                    id: role.id,
+                                    name: role.name
+                                });
+                            }
+
+                        });
+                    }
+
+                    //assigning role to user
+                    let roleAssigned = await this.assignRoleToUser(userId, assignRole, token);
+
+                    //Role assigned with status 
+                    if(roleAssigned.status == 204){
+                        resolve(tokenResponse);
+                    }
+
+                }else{
+
+                    resolve(tokenResponse);
+
+                }
+                 
 
             }
-            catch (er) {
-                reject(er);
+            catch (err) {
+                reject({
+                    "status": err.response.status,
+                    "message": err.response.data.error_description
+                });
             }
 
         });
     }
 
     //Authenticating Finesse User
-    async authenticateFinesse(username,password){
+    async authenticateFinesse(username,password, finesseUrl, userRoles){
         
-        await finesseService.authenticateUserViaFinesse(username,password);
-        let authenticated = false
-        let authToken = null;
-        let  fixedPassword = "123456ABC";
+        //Authentication of Finesse User, it returns a status code.
+        let finesseLoginResponse = await finesseService.authenticateUserViaFinesse(username,password,finesseUrl);
+        let authenticatedByKeycloak = false
+        let keycloakAuthToken = null;
 
-        try{
-
-            authToken = await this.authenticateUserViaKeycloak(username,fixedPassword,keycloakConfig["realm"]);
-            authenticated = true;
-
-        }catch(error){
-
-            console.log("**Exception: "+ error);
-
-        }finally{
+        if(finesseLoginResponse.status == 200){
             try{
-                if(!authenticated){
-
-                    authToken = await this.authenticateUserViaKeycloak(keycloakConfig["USERNAME_ADMIN"],keycloakConfig["PASSWORD_ADMIN"],keycloakConfig["realm"]);
-
-                    if(authToken.token){
-                         let userCreated = await this.createUser(username,fixedPassword,authToken.token);
-                         
-                         if(userCreated.status == 201){
-                             authToken = await this.authenticateUserViaKeycloak(username,fixedPassword,keycloakConfig["realm"]);
-                         }
-                    }
-                }
+                
+                //Checking whether finesse user already exist in keycloak and fetch its token
+                keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(username,password,keycloakConfig["realm"]);
+                authenticatedByKeycloak = true;
+    
             }catch(err){
-                console.log("**Exception: "+ err);
+
+                if(err.response.status == 401){
+
+                    console.log("User doesn't exist in Keycloak, syncing finesse user in keycloak...");
+
+                }else{
+
+                    throw({
+                        "status": err.response.status,
+                        "message": err.response.data.error_description
+                    });
+
+                }
+
+            }finally{
+
+                    //Finesse User not found in keycloak, so we are going to create one.
+                    if(!authenticatedByKeycloak){
+
+                        try{
+
+                            //Fetching admin token, we pass it in our "Create User" API for authorization
+                            keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(keycloakConfig["USERNAME_ADMIN"],keycloakConfig["PASSWORD_ADMIN"],keycloakConfig["realm"]);
+
+                        }catch(err){
+
+                            throw({
+                                "status": err.response.status,
+                                "message": "Error While getting Keycloak admin token: "+ err.response.data.error_description
+                            });
+
+                        }
+
+                        try{
+
+                            if(keycloakAuthToken.token){
+
+                                //Creating Finesse User inside keycloak.
+                                let userCreated = await this.createUser(username,password,keycloakAuthToken.token,userRoles);
+                                
+                                if(userCreated.status == 201){
+
+                                   //Returning the token of recently created User 
+                                   keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(username,password,keycloakConfig["realm"]);
+                                }
+                                
+                           }
+
+                        }catch(err){
+
+                            throw({
+                                "status": err.response.status,
+                                "message": "Error While creating Keycloak user: "+ err.response.data.error_description
+                            });
+                    }
+
+                }
             }
+    
+            return keycloakAuthToken;
+
+        }else{
+
+            return finesseLoginResponse
+
         }
-
-
-        return authToken;
     }
 
 }

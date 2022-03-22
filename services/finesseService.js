@@ -9,11 +9,11 @@ class FinesseService{
     }
 
 
-    async authenticateUserViaFinesse(username,password){
+    async authenticateUserViaFinesse(username,password,finesseUrl){
 
         return new Promise(async (resolve, reject) => {
             
-            var URL = keycloakConfig["finesse-server-url"] + '/finesse/api/User/' +username;
+            var URL = finesseUrl + '/finesse/api/User/' + username;
             
             let encodedCredentials = await this.maskCredentials(username,password); 
 
@@ -30,11 +30,19 @@ class FinesseService{
             try {
 
                 let tokenResponse = await requestController.httpRequest(config, true);
-                resolve(tokenResponse.status);
+                
+                resolve({
+                    'status': tokenResponse.status
+                });
 
             }
             catch (er) {
-                reject(er);
+
+                resolve({
+                    'status': er.response.status,
+                    'message': er.response.statusText
+                });
+
             }
 
         });
