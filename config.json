@@ -1,23 +1,22 @@
 {
-  "realm": "university",
-  "auth-server-url": "http://192.168.1.204:8080/auth/",
-  "ssl-required": "external",
-  "resource": "agent-manager",
-  "verify-token-audience": false,
-  "credentials": {
-    "secret": "QOJS4gyCMzv09GPs5ik0AvllBM05VIAC"
-  },
-  "use-resource-role-mappings": true,
-  "confidential-port": 0,
-  "policy-enforcer": {},
-  "CLIENT_ID": "agent-manager",
-  "CLIENT_DB_ID": "QOJS4gyCMzv09GPs5ik0AvllBM05VIAC",
-  "GRANT_TYPE": "password",
-  "GRANT_TYPE_PAT": "client_credentials",
-  "USERNAME_ADMIN": "admin",
-  "PASSWORD_ADMIN": "admin",
-  "SCOPE_NAME": "Any default scope",
-  "bearer-only": true,
-  "finesse-server-url": "https://uccx-morocco.ucce.ipcc:8445",
-  "GROUP": "Agent"
-}
+    "realm": "VRS",
+    "auth-server-url": "http://192.168.1.124:8088/auth/",
+    "ssl-required": "external",
+    "resource": "vrs",
+    "verify-token-audience": false,
+    "credentials": {
+      "secret": "461d914e-4b22-4978-8c67-7fe0dfe45d87"
+    },
+    "use-resource-role-mappings": true,
+    "confidential-port": 0,
+    "policy-enforcer": {},
+    "CLIENT_ID": "vrs",
+    "CLIENT_DB_ID": "461d914e-4b22-4978-8c67-7fe0dfe45d87",
+    "GRANT_TYPE": "password",
+    "GRANT_TYPE_PAT": "client_credentials",
+    "USERNAME_ADMIN": "admin",
+    "PASSWORD_ADMIN": "admin",
+    "SCOPE_NAME": "Any default scope",
+    "bearer-only": true,
+    "GROUP": "Agent_Group"
+  }
