@@ -10,7 +10,7 @@ This repository contains the source code for the Keycloak Node.js adapter. This 
 
 ### Installation 
 ```javascript
- npm install keycloak-nodejs-connect
+ npm install ef-keycloak-connect
  ```
  
 ## Usage
@@ -19,18 +19,26 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 ```
 ### Functions
 ```
- authenticateUserViaKeycloak
- getUsersByRole
- createResource
- deleteResource
- permitUsertoResoucre
- resoucreAuthorization
- revokeUseronResource
+  authenticateUserViaKeycloak
+  getAccessToken
+  getKeycloakTokenWithIntrospect
+  createResource
+  deleteResource
+  createPolicy
+  createPermission
+  resourceAuthorization
+  revokeUseronResource
+  createUser
+  getUsersByRole
+  getRealmRoles
+  assignRoleToUser
+  authenticateFinesse
 ```
 ### Example
 
 ```
-  var {NodeAdapter} = require("keycloak-nodejs-connect");
+  var {NodeAdapter} = require("ef-keycloak-connect");
+  const config = require(`${Path_To_Config_File}`);
   const keycloak = new NodeAdapter(config)
 
   ```
@@ -45,36 +53,40 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 Each function returns a promise so
 
 ```
-keycloak.authenticateUserViaKeycloak('admin', 'admin','cim').then((e) => {
+keycloak.authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2']).then((e) => {
     console.log("result :" + (e));
 }).catch((er) => {
     console.log("reject error : " + er);
 });
+
+   ```
+  Note: We use the same function to either **Authenticate Finesse User** or **Authenticate Via Keycloak**. In case of **Finesse Auth** we pass 2 additional params i.e Finesse Url & Roles Array, in case of **Authenticate Via Keycloak** we just send Finesse Url as empty string i.e ''
+  ```
 ```
 
 Sample `config` is given below:
 
 ```
 {
-  "realm": "cim",
-  "auth-server-url": "http://192.168.1.204:8080/auth/",
+  "realm": "keycloak_realm_name",
+  "auth-server-url": "http://keycloak_server_url}:port/auth/",
   "ssl-required": "external",
-  "resource": "unified-admin",
+  "resource": "keycloak_resource_name",
   "verify-token-audience": false,
   "credentials": {
-    "secret": "27080cdf-cdd8-4db1-b3ee-fdb0669b0222"
+    "secret": "461d914e-4b22-4978-8c67-7fe0dfe45d86"
   },
   "use-resource-role-mappings": true,
   "confidential-port": 0,
   "policy-enforcer": {},
-  "CLIENT_ID": "unified-admin",
-  "CLIENT_DB_ID": "95536d4e-c5d5-4876-8cc3-99025e18fc60",
+  "CLIENT_ID": "keycloak_resource_name",
+  "CLIENT_DB_ID": "461d914e-4b22-4978-8c67-7fe0dfe45d86",
   "GRANT_TYPE": "password",
   "GRANT_TYPE_PAT": "client_credentials",
-  "USERNAME_ADMIN": "uadmin",
-  "PASSWORD_ADMIN": "uadmin",
-  "SCOPE_NAME": "Any deafult scope",
-  "bearer-only":true
+  "USERNAME_ADMIN": "admin_name",
+  "PASSWORD_ADMIN": "admin_password",
+  "SCOPE_NAME": "Any default scope",
+  "bearer-only": true
 }
 ```
 
@@ -136,6 +148,10 @@ var server = app.listen(3000, function () {
 
 ```
 __Functions Description__
+
+   ```
+     This is the elaboration of functions exposed by EF Keycloak Adapter. It contains each function name, the arguments/parameters it take and the response each function generate.
+   ```
 
 ##### authenticateUserViaKeycloak(user_name, user_password, realm_name)
 ```
