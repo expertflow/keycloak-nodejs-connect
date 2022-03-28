@@ -1,4 +1,3 @@
-
 # Node JS module for keycloak
 Keycloak is an Open Source Identity and Access Management solution for modern Applications and Services.
 
