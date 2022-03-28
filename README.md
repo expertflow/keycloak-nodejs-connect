@@ -51,7 +51,7 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 Each function returns a promise so
 
 ```
-keycloak.authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, [{'role1','role2'}]).then((e) => {
+keycloak.authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2']).then((e) => {
     console.log("result :" + (e));
 }).catch((er) => {
     console.log("reject error : " + er);
@@ -185,7 +185,7 @@ This function performs 2 functionalities based on arguments/parameters provided.
 ***Finesse User Auth and Sync with keycloak***
  For Finesse User Auth we use the function as follows
  ```
-  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, [{'role1','role2'}])
+  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'])
  ```
  Finesse User Auth first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
 
@@ -193,7 +193,7 @@ This function performs 2 functionalities based on arguments/parameters provided.
 For Keycloak User Auth, we use the function as follows:
 
 ```
- authenticateUserViaKeycloak('admin', 'admin','cim','', [ ])
+ authenticateUserViaKeycloak('admin', 'admin','cim','', [])
 ```
 
  Keycloak User Auth ask keycloak whether user exists in keycloak realm or not. If user exists it returns a KeyCloakUser object with the user information.
