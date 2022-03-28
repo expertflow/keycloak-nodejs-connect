@@ -1,6 +1,5 @@
 var requestController = require("../controller/requestController.js");
 const https = require('https');
-var keycloakConfig = require("../config.json");
 
 class FinesseService{
 

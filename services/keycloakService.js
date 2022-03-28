@@ -1,7 +1,6 @@
 var session = require("express-session");
 var Keycloak = require("keycloak-connect");
 var requestController = require("../controller/requestController.js");
-var config = require("../config.json");
 var memory = new session.MemoryStore();
 var keycloakConfig = null;
 
@@ -10,7 +9,7 @@ const finesseService = new FinesseService();
 
 class KeycloakService extends Keycloak{
 
-    constructor() {
+    constructor(config) {
 
         keycloakConfig =  {...config};
         super({ store: memory }, keycloakConfig);   //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
@@ -732,7 +731,7 @@ class KeycloakService extends Keycloak{
 
                 let tokenResponse = await requestController.httpRequest(config, false);
 
-                if(userRoles == ''){
+                if(userRoles != []){
                     //Get the user id at time of creation
                     let userLocation = tokenResponse.headers.location;
                     let userLocationSplit = userLocation.split("/");
