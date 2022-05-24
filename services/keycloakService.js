@@ -1,5 +1,6 @@
 var session = require("express-session");
 var Keycloak = require("keycloak-connect");
+const Joi = require('joi');
 var requestController = require("../controller/requestController.js");
 var memory = new session.MemoryStore();
 var keycloakConfig = null;
@@ -17,7 +18,7 @@ class KeycloakService extends Keycloak{
     }
 
     //Based on the attributes it either authenticate keycloak user or finesse user.
-    async authenticateUserViaKeycloak(user_name, user_password, realm_name, finesseUrl, userRoles) {
+    async authenticateUserViaKeycloak(user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken) {
 
         let token = '';
 
@@ -28,9 +29,11 @@ class KeycloakService extends Keycloak{
             return token;
 
         }else{
+
             // Finesse Auth, takes userRole in argument to create user along with role.
-            token = await this.authenticateFinesse(user_name, user_password, finesseUrl, userRoles)
+            token = await this.authenticateFinesse(user_name, user_password, finesseUrl, userRoles, finesseToken)
             return token;
+            
         }
         
     }
@@ -783,12 +786,24 @@ class KeycloakService extends Keycloak{
     }
 
     //Authenticating Finesse User
-    async authenticateFinesse(username,password, finesseUrl, userRoles){
+    async authenticateFinesse(username,password, finesseUrl, userRoles, finesseToken){
         
-        //Authentication of Finesse User, it returns a status code.
-        let finesseLoginResponse = await finesseService.authenticateUserViaFinesse(username,password,finesseUrl);
-        let authenticatedByKeycloak = false
+        //Authentication of Finesse User, it returns a status code 200 if user found and 401 if unauthorized.
+        let finesseLoginResponse;
+
+        if(finesseToken.length == 0){
+            finesseLoginResponse = await finesseService.authenticateUserViaFinesse(username,password,finesseUrl);
+
+        }else{
+            finesseLoginResponse = await finesseService.authenticateUserViaFinesseSSO(username,finesseToken,finesseUrl);
+        }
+
+        //If user is SSO then password is not provided, we are setting up a pre-defined password.
+        password = (password.length == 0)?"123456":password;
+        
+        let authenticatedByKeycloak = false;
         let keycloakAuthToken = null;
+        let timeoutErr = null;
 
         if(finesseLoginResponse.status == 200){
             try{
@@ -821,39 +836,70 @@ class KeycloakService extends Keycloak{
 
                             //Fetching admin token, we pass it in our "Create User" API for authorization
                             keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(keycloakConfig["USERNAME_ADMIN"],keycloakConfig["PASSWORD_ADMIN"],keycloakConfig["realm"]);
-
                         }catch(err){
 
-                            throw({
-                                "status": err.response.status,
-                                "message": "Error While getting Keycloak admin token: "+ err.response.data.error_description
-                            });
+                            if(err.code == "ETIMEDOUT"){
+
+                                throw({
+                                    'Keycloak login status': 408,
+                                    'keycloak login message': `Keycloak server unaccessable against URL: ${keycloakConfig["auth-server-url"]}`
+                                });
+
+                            }else{
+                                throw({
+                                    "status": err.response.status,
+                                    "message": "Error While getting Keycloak admin token: "+ err.response.data.error_description
+                                });
+                            }
 
                         }
 
+                        if(keycloakAuthToken.token){
+
+                            let token = keycloakAuthToken.token;
+
+                            //validating customer Before Creation
+                            let {error, value} = validateUser({username, password, token, userRoles});
+
+                            if(error){
+
+                                throw({
+                                    "status": 400,
+                                    "message": "Error while creation of user, error message: "+ error.details[0].message
+                                })
+                            }
+                        }
+
                         try{
+                            //Creating Finesse User inside keycloak.
+                            let userCreated = await this.createUser(username,password,keycloakAuthToken.token,userRoles);
+                            
+                            if(userCreated.status == 201){
 
-                            if(keycloakAuthToken.token){
-
-                                //Creating Finesse User inside keycloak.
-                                let userCreated = await this.createUser(username,password,keycloakAuthToken.token,userRoles);
+                                //Returning the token of recently created User 
+                                keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(username,password,keycloakConfig["realm"]);
+                            }
                                 
-                                if(userCreated.status == 201){
-
-                                   //Returning the token of recently created User 
-                                   keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(username,password,keycloakConfig["realm"]);
-                                }
-                                
-                           }
 
                         }catch(err){
 
-                            throw({
-                                "status": err.response.status,
-                                "message": "Error While creating Keycloak user: "+ err.response.data.error_description
-                            });
-                    }
+                            if(err.code == "ETIMEDOUT"){
 
+                                throw({
+                                    'Keycloak login status': 408,
+                                    'keycloak login message': `Keycloak server unaccessable against URL: ${keycloakConfig["auth-server-url"]}`
+                                });
+
+                            }else{
+
+                                console.log(err);
+
+                                throw({
+                                    "status": err.response.status,
+                                    "message": "Error While creating Keycloak user: "+ err.response.data.error_description
+                                });
+                            }   
+                    }
                 }
             }
     
@@ -866,6 +912,17 @@ class KeycloakService extends Keycloak{
         }
     }
 
+}
+
+function validateUser(userData) {
+    let schema = Joi.object({
+        username: Joi.string().min(1).max(255).required(),
+        password: Joi.string().min(1).max(255).required(),
+        token: Joi.string().required(),
+        userRoles: Joi.array().items(Joi.string()).allow(null)
+    });
+ 
+    return schema.validate(userData);
 }
 
 module.exports = KeycloakService;
