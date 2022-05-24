@@ -37,11 +37,69 @@ class FinesseService{
             }
             catch (er) {
 
+                if(er.code == "ENOTFOUND"){
+
+                    resolve({
+                        'finesse login status': 408,
+                        'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
+                    });
+
+                }else if(er.response){
+
+                    resolve({
+                        'finesse login status': er.response.status,
+                        'finesse login message': er.response.statusText
+                    });
+
+                }
+                
+            }
+
+        });
+    }
+
+    async authenticateUserViaFinesseSSO(username,finesseToken,finesseUrl){
+
+        return new Promise(async (resolve, reject) => {
+            
+            var URL = finesseUrl + '/finesse/api/User/' + username;
+
+            let config = {
+                method: 'get',
+                url: URL,
+                headers: {
+                    'Authorization': `Bearer ${finesseToken}`
+                },
+                //disable ssl
+                httpsAgent: new https.Agent({rejectUnauthorized: false})
+            };
+
+            try {
+
+                let tokenResponse = await requestController.httpRequest(config, true);
+                
                 resolve({
-                    'status': er.response.status,
-                    'message': er.response.statusText
+                    'status': tokenResponse.status
                 });
 
+            }
+            catch (er) {
+
+                if(er.code == "ENOTFOUND"){
+
+                    resolve({
+                        'finesse login status': 408,
+                        'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
+                    });
+
+                }else if(er.response){
+
+                    resolve({
+                        'finesse login status': er.response.status,
+                        'finesse login message': er.response.statusText
+                    });
+
+                }
             }
 
         });
