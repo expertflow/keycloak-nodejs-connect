@@ -1,9 +1,15 @@
-# Node JS module for keycloak
+# Node JS adapter for keycloak
 Keycloak is an Open Source Identity and Access Management solution for modern Applications and Services.
 
 This repository contains the source code for the Keycloak Node.js adapter. This module makes it simple to implement a Node.js Connect-friendly application that uses Keycloak for its authentication and authorization needs.
 
 [Documentation](https://www.keycloak.org/documentation.html)
+
+# EF Keycloak Connect
+
+**ef-keycloak-connect** extends on the functionality of Keycloak Node JS adapter by using Keycloak APIs to simplify its functionality. This package provides functions to Authencticate a user, get access token with introspect, create and delete resource, create users, roles and assign role to users. 
+
+**ef-keycloak-connect** also includes the functions to authenticate users from Cisco Finesse for both SSO and Non SSO instances.
 
 ## Getting started
 
