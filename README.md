@@ -199,7 +199,7 @@ This function performs 3 functionalities based on arguments/parameters provided.
 ***Finesse User Auth and Sync with keycloak (SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
    ```
-   authenticateFinesse('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+   authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
    ```
   Difference between *Finesse User Auth(SSO)* and *Finesse User Auth(Non SSO)* is that SSO uses finesse_token field while Password field remains ' ', while in Non SSO a Password is sent by user and finesse_token field remains ' '
   
