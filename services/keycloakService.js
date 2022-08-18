@@ -584,39 +584,50 @@ class KeycloakService extends Keycloak{
                     let count = 0;
                     let flag = true;
                     let obj = [];  // final object to be returned
-                    let rolesCount = 0;
+
                     for (let i = 0; i < keycloak_roles.length; i++) {
                         try {
+
                             config.url = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/roles/' + keycloak_roles[i] + '/users'
                             let getUsersfromRoles = await requestController.httpRequest(config, true);
                             userObject = getUsersfromRoles.data;
-                            for (let check = 0; check < userObject.length; check++) {
-                                let tobecheckedID = userObject[check].id;
-                                for (let org = 0; org < count; org++) {
-                                    if (tobecheckedID === obj[org].id) {
-                                        obj[org].roles[++rolesCount] = keycloak_roles[i];
+
+                            userObject.forEach((user) => {
+
+                                if(count > 0){
+
+                                   let userIndex = obj.findIndex(usr => {
+                                        return usr.username == user.username;
+                                   });
+
+                                   if(userIndex != -1){
+                                        obj[userIndex].roles.push(keycloak_roles[i]);
                                         flag = false;
-                                    }
+                                   }
                                 }
-                                if (flag == true) {
-                                    obj[count] = {
-                                        'id': userObject[check].id,
-                                        'username': userObject[check].username,
-                                        'firstName': userObject[check].firstName,
-                                        'lastName': userObject[check].lastName,
+                                
+                                if(flag == true){
+
+                                    obj.push({
+                                        'id': user.id,
+                                        'username': user.username,
+                                        'firstName': ((user.firstName == undefined)? "" : user.firstName),
+                                        'lastName': ((user.lastName == undefined)? "" : user.lastName),
                                         'roles': [keycloak_roles[i]]
-                                    }
-                                    if (obj[count].firstName == undefined) {
-                                        obj[count].firstName = "";
-                                        obj[count].lastName = "";
-                                    }
-                                    count = count + 1;
+                                    }) 
+
                                 }
-                            }
+    
+                                flag = true;
+
+                            });
+
                         }
                         catch (er) {
                             reject(er);
                         }
+
+                        count++;
                     }
                     resolve(obj);
                 }
