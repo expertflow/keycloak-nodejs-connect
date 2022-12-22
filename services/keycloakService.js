@@ -588,7 +588,7 @@ class KeycloakService extends Keycloak{
                     for (let i = 0; i < keycloak_roles.length; i++) {
                         try {
 
-                            config.url = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/roles/' + keycloak_roles[i] + '/users'
+                            config.url = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/roles/' + keycloak_roles[i] + '/users?max=100000'
                             let getUsersfromRoles = await requestController.httpRequest(config, true);
                             userObject = getUsersfromRoles.data;
 
