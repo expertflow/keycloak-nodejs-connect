@@ -150,6 +150,12 @@ class KeycloakService extends Keycloak{
                                                 'realm': realm_name
 
                                             };
+
+                                            //Adding user custom attribute to our token object data.
+                                            if(getuserDetails.data[0].attributes){
+                                                responseObject.attributes = getuserDetails.data[0].attributes;
+                                            }
+
                                             let finalObject = {
                                                 'token': userToken,
                                                 'keycloak_User': responseObject
