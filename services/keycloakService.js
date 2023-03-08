@@ -81,6 +81,7 @@ class KeycloakService extends Keycloak {
 
         return new Promise(async (resolve, reject) => {
             let token;
+            let refresh_token;
             var URL = keycloakConfig["auth-server-url"] + 'realms/' + realm_name + '/protocol/openid-connect/token'
             //keycloakConfig["auth-server-url"] +'realms
             let config = {
@@ -114,6 +115,8 @@ class KeycloakService extends Keycloak {
                         var rptResponse = await requestController.httpRequest(config, true);
                         if (rptResponse.data.access_token) {
                             token = rptResponse.data.access_token;
+                            refresh_token = rptResponse.data.refresh_token;
+
                             var userToken = token;
                             config.data.grant_type = keycloakConfig.GRANT_TYPE;
                             config.data.token = token;
@@ -158,6 +161,8 @@ class KeycloakService extends Keycloak {
                                             //Adding user custom attribute to our token object data.
                                             if (getuserDetails.data[0].attributes) {
                                                 responseObject.attributes = getuserDetails.data[0].attributes;
+                                            } else {
+                                                responseObject.attributes = {};
                                             }
 
                                             delete config.headers.Authorization;
@@ -172,6 +177,7 @@ class KeycloakService extends Keycloak {
 
                                                 let finalObject = {
                                                     'token': userToken,
+                                                    'refresh_token': refresh_token,
                                                     'keycloak_User': responseObject
                                                 }
                                                 resolve(finalObject);
@@ -1270,6 +1276,56 @@ class KeycloakService extends Keycloak {
             return finesseLoginResponse
 
         }
+    }
+
+    async generateAccessTokenFromRefreshToken(refreshToken) {
+
+        return new Promise(async (resolve, reject) => {
+            let accessToken;
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token'
+
+            var config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data: {
+                    client_id: keycloakConfig.CLIENT_ID,
+                    client_secret: keycloakConfig.credentials.secret,
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken
+                }
+            };
+
+            try {
+                let refreshTokenResponse = await requestController.httpRequest(config, true);
+
+                let accessToken = refreshTokenResponse.data.access_token;
+                resolve({
+                    'status': 200,
+                    'access_token': accessToken
+                });
+
+            } catch (error) {
+
+                if (error.response) {
+
+                    if (error.response.data.error_description == 'Token is not active') {
+                        error.response.data.error_description = 'Refresh Token expired, please login again';
+                    }
+
+                    reject({
+                        'status': error.response.status,
+                        'message': `${error.response.data.error_description}`
+                    });
+
+                } else {
+                    reject({ 'message': error.message });
+                }
+            }
+
+        });
     }
 
     async checkErrorType(err) {
