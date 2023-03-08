@@ -116,7 +116,8 @@ class TeamsService {
                                         'team': {
                                             'teamId': id,
                                             'teamName': name
-                                        }
+                                        },
+                                        'attributes': (user.attributes) ? user.attributes : {}
                                     });
                                 }
 
