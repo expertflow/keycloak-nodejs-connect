@@ -1067,8 +1067,41 @@ class KeycloakService extends Keycloak {
     async createUser(username, password, token, userRoles) {
 
         let assignRole = [];
+        let assignGroups = ['agents', 'default'];
 
         return new Promise(async (resolve, reject) => {
+
+
+            for (let group of assignGroups) {
+
+                let URL2 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups?search=' + group;
+
+                let config1 = {
+                    method: 'get',
+                    url: URL2,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+
+                try {
+                    let groupData = await requestController.httpRequest(config1, true);
+
+                    if (groupData.data.length == 0) {
+
+                        let createdGroup = await this.createGroup(token, group);
+
+                    }
+                } catch (err) {
+                    reject({
+                        "status": err.response.status,
+                        "message": err.response.data.error_description
+                    });
+                }
+
+            }
+
 
             let URL = `${keycloakConfig["auth-server-url"]}${keycloakConfig["USERNAME_ADMIN"]}/realms/${keycloakConfig["realm"]}/users`;
 
@@ -1081,10 +1114,9 @@ class KeycloakService extends Keycloak {
                         value: password,
                         temporary: false
                     }
-                ]
+                ],
+                groups: ["agents", "default"]
             }
-
-
 
             let config = {
                 method: 'post',
@@ -1149,6 +1181,43 @@ class KeycloakService extends Keycloak {
             }
 
         });
+    }
+
+    async createGroup(adminToken, groupName) {
+
+        return new Promise(async (resolve, reject) => {
+
+            let URL = `${keycloakConfig["auth-server-url"]}${keycloakConfig["USERNAME_ADMIN"]}/realms/${keycloakConfig["realm"]}/groups`;
+
+            let data = {
+                name: groupName
+            }
+
+
+            let config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Authorization': `Bearer ${adminToken}`
+                },
+                data: data
+            };
+
+            try {
+
+                let createdGroup = await requestController.httpRequest(config, false);
+                resolve(createdGroup.data);
+
+            }
+            catch (err) {
+                reject({
+                    "status": err.response.status,
+                    "message": err.response.data.error_description
+                });
+            }
+
+        });
+
     }
 
     //Authenticating Finesse User
