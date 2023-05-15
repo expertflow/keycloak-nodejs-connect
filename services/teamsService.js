@@ -137,6 +137,126 @@ class TeamsService {
             }
         });
     }
+
+    async getGroupsList(token, keycloakConfig) {
+        return new Promise(async (resolve, reject) => {
+
+            try {
+
+                let URL = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups';
+
+                var config = {
+                    method: 'get',
+                    url: URL,
+                    headers: {
+                        'Accept': 'application/json',
+                        'cache-control': 'no-cache',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    }
+                };
+
+                try {
+
+                    let groups = await requestController.httpRequest(config, false);
+                    let groupsList = groups.data;
+
+                    resolve(groupsList);
+
+                } catch (error) {
+                    reject(error);
+                }
+            } catch (er) {
+                reject("error" + er);
+            };
+        });
+    }
+
+    async getUsersList(token, keycloakConfig) {
+        return new Promise(async (resolve, reject) => {
+
+            try {
+
+                let URL = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/users?max=10000';
+
+                var config = {
+                    method: 'get',
+                    url: URL,
+                    headers: {
+                        'Accept': 'application/json',
+                        'cache-control': 'no-cache',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    }
+                };
+
+                try {
+
+                    let users = await requestController.httpRequest(config, false);
+                    let usersList = users.data;
+
+                    resolve(usersList);
+
+                } catch (error) {
+                    reject(error);
+                }
+            } catch (er) {
+                reject("error" + er);
+            };
+        });
+    }
+
+    async addSupervisorToGroup(supervisedGroups, token, keycloakConfig) {
+
+        let updatedGroups;
+
+        return new Promise(async (resolve, reject) => {
+
+            try {
+
+                supervisedGroups.forEach(async group => {
+
+                    let URL = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups/' + group.id;
+
+                    var config = {
+                        method: 'put',
+                        url: URL,
+                        headers: {
+                            'Accept': 'application/json',
+                            'cache-control': 'no-cache',
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        },
+                        headers: {
+                            'Authorization': 'Bearer ' + token
+                        },
+                        data: {
+                            name: group.name,
+                            attributes: {
+                                supervisor: group.supervisors
+                            }
+                        }
+                    };
+
+                    try {
+
+                        let groups = await requestController.httpRequest(config, false);
+
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+
+                resolve('Supervisors Added');
+
+            } catch (er) {
+                reject("error" + er);
+            };
+        });
+    }
 }
 
 module.exports = TeamsService;
