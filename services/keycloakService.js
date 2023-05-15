@@ -1,6 +1,7 @@
 var session = require("express-session");
 var Keycloak = require("keycloak-connect");
 const Joi = require('joi');
+const parseXMLString = require('xml2js').parseString;
 var requestController = require("../controller/requestController.js");
 var memory = new session.MemoryStore();
 var keycloakConfig = null;
@@ -672,14 +673,16 @@ class KeycloakService extends Keycloak {
                         if (userGroup.data.length != 0) {
 
 
-                            let group = userGroup.data;
+                            let groups = userGroup.data;
                             let userTeam = {};
                             let supervisedTeams = [];
 
+                            let filteredTeams = groups.filter(group => !group.name.includes('_permission'));
+
 
                             userTeam = {
-                                'teamId': group[0].id,
-                                'teamName': group[0].name
+                                'teamId': filteredTeams[0].id,
+                                'teamName': filteredTeams[0].name
                             }
 
                             team.userTeam = userTeam;
@@ -700,7 +703,7 @@ class KeycloakService extends Keycloak {
 
                                     let result = await teamsService.getGroupByGroupID(group.id, username, token, keycloakConfig);
 
-                                    if (result) {
+                                    if (result && !result.teamName.includes('_permission')) {
                                         supervisedTeams.push(result);
                                     }
                                 };
@@ -823,6 +826,7 @@ class KeycloakService extends Keycloak {
                                 delete config.url
 
                                 groupsData = groups.data;
+                                groupsData = groupsData.filter(group => !group.name.includes('_permission'));
 
 
                             } catch (er) {
@@ -845,6 +849,7 @@ class KeycloakService extends Keycloak {
                                 if (groupsIdsArr.length == 0) {
 
                                     let supervisedGroups = keycloakObj.supervisedTeams;
+                                    supervisedGroups = supervisedGroups.filter(group => !group.teamName.includes('_permission'));
                                     groupsData = supervisedGroups;
 
                                     //only send the users of provided groups.
@@ -871,6 +876,7 @@ class KeycloakService extends Keycloak {
                                         groupsArr.push(group);
                                     });
 
+                                    groupsArr = groupsArr.filter(group => !group.teamName.includes('_permission'));
                                     groupsData = groupsArr;
                                 }
                             }
@@ -1183,6 +1189,97 @@ class KeycloakService extends Keycloak {
         });
     }
 
+    async createFinesseUser(userObject, token) {
+
+        let assignRole = [];
+
+        return new Promise(async (resolve, reject) => {
+
+
+            let URL = `${keycloakConfig["auth-server-url"]}${keycloakConfig["USERNAME_ADMIN"]}/realms/${keycloakConfig["realm"]}/users`;
+
+            let data = {
+                username: userObject.username,
+                firstName: userObject.firstName,
+                lastName: userObject.lastName,
+                enabled: true,
+                credentials: [
+                    {
+                        type: 'password',
+                        value: '123456',
+                        temporary: false
+                    }
+                ],
+                groups: userObject.group
+            }
+
+            let config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                data: data
+            };
+
+            try {
+
+                let tokenResponse = await requestController.httpRequest(config, false);
+                let userRoles = userObject.roles;
+
+                if (userRoles != []) {
+                    //Get the user id at time of creation
+                    let userLocation = tokenResponse.headers.location;
+                    let userLocationSplit = userLocation.split("/");
+                    let userId = userLocationSplit[(userLocationSplit.length) - 1];
+
+
+                    //Get list of all the roles in keycloak realm
+                    let realmRoles = await this.getRealmRoles(token);
+
+                    //checking whether role exist in realmRoles object array:
+                    for (let role of realmRoles.data) {
+
+                        userRoles.forEach(userRole => {
+
+                            if (role.name == userRole.toLocaleLowerCase()) {
+
+                                assignRole.push({
+                                    id: role.id,
+                                    name: role.name
+                                });
+                            }
+
+                        });
+                    }
+
+                    //assigning role to user
+                    let roleAssigned = await this.assignRoleToUser(userId, assignRole, token);
+
+                    //Role assigned with status 
+                    if (roleAssigned.status == 204) {
+                        resolve(tokenResponse);
+                    }
+
+                } else {
+
+                    resolve(tokenResponse);
+
+                }
+
+
+            }
+            catch (err) {
+                reject({
+                    "status": err.response.status,
+                    "message": err.response.data.error_description
+                });
+            }
+
+        });
+    }
+
     async createGroup(adminToken, groupName) {
 
         return new Promise(async (resolve, reject) => {
@@ -1208,8 +1305,7 @@ class KeycloakService extends Keycloak {
                 let createdGroup = await requestController.httpRequest(config, false);
                 resolve(createdGroup.data);
 
-            }
-            catch (err) {
+            } catch (err) {
                 reject({
                     "status": err.response.status,
                     "message": err.response.data.error_description
@@ -1218,6 +1314,169 @@ class KeycloakService extends Keycloak {
 
         });
 
+    }
+
+    async syncCiscoTeams(administratorUsername, administratorPassword, finesseUrl) {
+
+        return new Promise(async (resolve, reject) => {
+
+            //admin token url
+            let token;
+            let createdGroups;
+            let groupSupervisors = [];
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token';
+
+            //request config to fetch admin token
+            var config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Accept': 'application/json',
+                    'cache-control': 'no-cache',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data: {
+                    client_id: keycloakConfig.CLIENT_ID,
+                    username: keycloakConfig.USERNAME_ADMIN,
+                    password: keycloakConfig.PASSWORD_ADMIN,
+                    grant_type: keycloakConfig.GRANT_TYPE,
+                    client_secret: keycloakConfig.credentials.secret
+                }
+            };
+
+            try {
+
+                //http request to fetch admin token
+                let adminTokenResponse = await requestController.httpRequest(config, true);
+                token = adminTokenResponse.data.access_token;
+
+                //Service to get all existing keycloak groups
+                let groupsList = await teamsService.getGroupsList(token, keycloakConfig);
+                let groupNames = null;
+
+                if (groupsList != null) {
+                    groupNames = groupsList.map(group => group.name);
+                }
+
+                //service to get all the teams from Cisco Finesse
+                let teamsList = await finesseService.getCiscoTeams(administratorUsername, administratorPassword, finesseUrl);
+
+                //Converting the XML String returned from Finesse to JS Object
+                parseXMLString(teamsList, async (err, result) => {
+                    if (err) {
+                        console.error(err);
+                    } else {
+
+                        //iterating through the Cisco finesse teams
+                        for (let team of result.Teams.Team) {
+
+                            //Converting both finesse teams and keycloak teams to lowercase for non case sensitive comparison
+                            let isExist = groupNames.map(group => group.toLowerCase()).includes((team.name[0]).toLowerCase());
+
+                            //Creating new group on keycloak side against finesse team if doesn't exist already.
+                            if (!isExist) {
+                                let newGroup = await this.createGroup(token, team.name[0]);
+                            }
+
+                        }
+
+                        //Get the list of newly created groups in keycloak. We use it later to add supervisor to group
+                        groupsList = await teamsService.getGroupsList(token, keycloakConfig);
+                        groupNames = null;
+
+                        if (groupsList != null) {
+                            groupNames = groupsList.map(group => {
+                                return {
+                                    id: group.id,
+                                    name: group.name
+                                }
+                            });
+                        }
+
+                        //Service to get all existing keycloak users
+                        let usersList = await teamsService.getUsersList(token, keycloakConfig);
+                        let userNames = null;
+
+                        if (usersList != null) {
+                            userNames = usersList.map(user => user.username);
+                        }
+
+                        //service to get existing users list from Cisco Finesse
+                        let ciscoUsersList = await finesseService.getCiscoUsers(administratorUsername, administratorPassword, finesseUrl);
+
+                        parseXMLString(ciscoUsersList, async (err, result) => {
+
+                            if (err) {
+                                console.error(err);
+                            } else {
+
+                                for (let user of result.Users.User) {
+
+                                    //Converting both finesse user and keycloak user to lowercase for non case sensitive comparison
+                                    let isExist = userNames.map(user => user.toLowerCase()).includes((user.loginName[0]).toLowerCase());
+
+                                    //Creating new user on keycloak side against finesse user if doesn't exist already.
+                                    if (!isExist) {
+
+                                        let userObject = {
+                                            username: user.loginName[0],
+                                            firstName: user.firstName[0],
+                                            lastName: user.lastName[0],
+                                            roles: (user.roles[0].role).map(role => role.toLowerCase()),
+                                            group: (user.teamName == '' || user.teamName == null) ? ['Default'] : user.teamName
+                                        }
+
+                                        if (user.teams) {
+                                            if (user.teams[0].Team) {
+                                                userObject.supervisedGroups = (user.teams[0].Team).map(team => team.name[0]);
+
+
+                                                userObject.supervisedGroups.forEach(groupName => {
+
+
+                                                    let keycloakGroupToSupervise = groupNames.find(group => group.name == groupName);
+                                                    let isExistGroup = groupSupervisors.findIndex(group => group.name == groupName);
+
+                                                    if (isExistGroup == -1) {
+                                                        groupSupervisors.push({
+                                                            id: keycloakGroupToSupervise.id,
+                                                            name: keycloakGroupToSupervise.name,
+                                                            supervisors: [`${userObject.username}`]
+                                                        })
+                                                    } else {
+                                                        groupSupervisors[isExistGroup].supervisors[0] += `,${userObject.username}`;
+                                                    }
+                                                });
+
+                                            }
+                                        }
+
+                                        let newUser = await this.createFinesseUser(userObject, token);
+                                    }
+
+                                }
+
+                                if (groupSupervisors.length != 0) {
+                                    //Assigning Groups to Supervisors
+                                    let assignedSupervisors = await teamsService.addSupervisorToGroup(groupSupervisors, token, keycloakConfig);
+                                }
+
+                            }
+
+                        });
+
+
+                        resolve('All Groups Created');
+                    }
+                });
+
+
+            } catch (er) {
+
+                let error = await this.checkErrorType(er);
+                reject(error);
+            }
+        });
     }
 
     //Authenticating Finesse User
