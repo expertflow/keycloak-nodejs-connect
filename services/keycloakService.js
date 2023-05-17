@@ -1073,7 +1073,7 @@ class KeycloakService extends Keycloak {
     async createUser(username, password, token, userRoles) {
 
         let assignRole = [];
-        let assignGroups = ['agents', 'default'];
+        let assignGroups = ['agents_permission', 'default'];
 
         return new Promise(async (resolve, reject) => {
 
@@ -1121,7 +1121,7 @@ class KeycloakService extends Keycloak {
                         temporary: false
                     }
                 ],
-                groups: ["agents", "default"]
+                groups: ["agents_permission", "default"]
             }
 
             let config = {
