@@ -913,6 +913,166 @@ class KeycloakService extends Keycloak {
 
     }
 
+    //function to be used only in teams implementation. We give the list of ids of groups and it returns all its members and supervisors
+    async getGroupMembers(groupIds) {
+
+        return new Promise(async (resolve, reject) => {
+
+            let token;
+            let groupsData = [];
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token';
+
+            var config = {
+                method: 'post',
+                url: URL,
+                headers: {
+                    'Accept': 'application/json',
+                    'cache-control': 'no-cache',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data: {
+                    client_id: keycloakConfig.CLIENT_ID,
+                    username: keycloakConfig.USERNAME_ADMIN,
+                    password: keycloakConfig.PASSWORD_ADMIN,
+                    grant_type: keycloakConfig.GRANT_TYPE,
+                    client_secret: keycloakConfig.credentials.secret
+                }
+            };
+
+            try {
+
+                let adminTokenResponse = await requestController.httpRequest(config, true);
+                token = adminTokenResponse.data.access_token;
+
+                if (groupIds.length > 0) {
+
+                    config.method = 'get';
+                    delete config.data;
+                    delete config.url;
+                    config.headers.Authorization = 'Bearer ' + token;
+
+
+                    for (let i = 0; i < groupIds.length; i++) {
+
+                        try {
+
+                            let groupData = {};
+
+                            let URL2 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups/' + groupIds[i] + '/';
+                            config.url = URL2;
+                            let groupInfo = await requestController.httpRequest(config, true);
+
+                            groupData.teamId = groupInfo.data.id;
+                            groupData.teamName = groupInfo.data.name;
+
+                            if (Object.keys(groupInfo.data.attributes).length == 0) {
+
+                                groupData.supervisors = [];
+                            } else {
+
+                                let attributes = groupInfo.data.attributes;
+
+                                if ('supervisor' in attributes) {
+
+                                    let supervisorList = attributes['supervisor'][0].split(",");
+                                    let supervisors = [];
+
+                                    for (let j = 0; j < supervisorList.length; j++) {
+
+                                        let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/users?username=' + supervisorList[j] + '&exact=true';
+                                        config.url = URL3;
+
+
+                                        try {
+
+                                            let supervisorUser = await requestController.httpRequest(config, true);
+
+                                            if (supervisorUser.data.length > 0) {
+                                                supervisors.push({
+                                                    supervisorId: supervisorUser.data[0].id,
+                                                    supervisorName: supervisorUser.data[0].username
+                                                })
+                                            }
+                                        } catch (err) {
+                                            if (err.response) {
+                                                reject({
+                                                    status: err.response.status,
+                                                    errorMessage: err.response.data
+                                                });
+                                            }
+
+                                            reject(err);
+
+                                        }
+                                    }
+
+                                    groupData.supervisors = supervisors;
+
+                                }
+
+                            }
+
+                            let URL4 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups/' + groupIds[i] + '/members';
+                            config.url = URL4;
+                            let users = await requestController.httpRequest(config, true);
+
+
+                            if (users.data.length > 0) {
+
+                                let agents = users.data;
+                                agents = agents.map(agent => {
+                                    return {
+                                        agentId: agent.id,
+                                        agentName: agent.username
+                                    }
+                                });
+
+                                groupData.agents = agents;
+
+                            } else {
+                                groupData.agents = [];
+                            }
+
+                            groupsData.push(groupData);
+
+                        } catch (err) {
+
+                            if (err.response) {
+                                reject({
+                                    status: err.response.status,
+                                    errorMessage: err.response.data
+                                });
+                            }
+
+                            reject(err);
+
+                        }
+
+                    }
+
+                    resolve(groupsData);
+                }
+
+                resolve([]);
+
+            } catch (err) {
+
+                if (err.response) {
+                    reject({
+                        status: err.response.status,
+                        errorMessage: err.response.data
+                    });
+                }
+
+                reject(err);
+
+            }
+
+        });
+
+    }
+
+
     // this function requires comma separated list of roles in parameter e.g ["robot","human","customer"];
     getUsersByRole(keycloak_roles) {
         return new Promise(async (resolve, reject) => {
@@ -1080,7 +1240,7 @@ class KeycloakService extends Keycloak {
 
             for (let group of assignGroups) {
 
-                let URL2 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups?search=' + group;
+                let URL2 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups?search=' + group + '&exact=true';
 
                 let config1 = {
                     method: 'get',
