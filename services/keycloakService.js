@@ -148,8 +148,8 @@ class KeycloakService extends Keycloak {
                                             let getuserDetails = await requestController.httpRequest(config, true);
                                             let responseObject = {
                                                 'id': getuserDetails.data[0].id,
-                                                'firstName': getuserDetails.data[0].firstName,
-                                                'lastName': getuserDetails.data[0].lastName,
+                                                'firstName': getuserDetails.data[0].firstName ? getuserDetails.data[0].firstName : '',
+                                                'lastName': getuserDetails.data[0].lastName ? getuserDetails.data[0].lastName : '',
                                                 'username': getuserDetails.data[0].username,
                                                 'permittedResources': {
                                                     'Resources': intrsopectionResponse.data.authorization.permissions
@@ -184,11 +184,21 @@ class KeycloakService extends Keycloak {
                                                 resolve(finalObject);
 
                                             } catch (error) {
-                                                reject("Error while fetching Groups of User in Auth Process" + error);
+                                                console.log("Error while fetching Groups of User in Auth Process ");
+                                                reject(error);
                                             }
                                         }
                                         catch (error) {
-                                            reject("Get all users request not sent" + error);
+
+                                            if (error.response) {
+                                                reject({
+                                                    error: 'Error while fetching the User Details during Login Process',
+                                                    status: error.response.status,
+                                                    errorMessage: error.response.data
+                                                });
+                                            }
+
+                                            reject("Error while fetching the User Details during Login Process " + error);
                                         }
                                     }
                                     else {
@@ -197,25 +207,61 @@ class KeycloakService extends Keycloak {
                                     }
                                 }
                                 catch (error) {
-                                    reject("Admin Request not sent" + error);
+
+                                    if (error.response) {
+                                        reject({
+                                            error: 'Error while generating Admin Access Token',
+                                            status: error.response.status,
+                                            errorMessage: error.response.data
+                                        });
+                                    }
+
+                                    reject("Error while generating Admin Access Token " + error);
                                 }
                             }
                             catch (error) {
-                                reject(error);
+                                if (error.response) {
+                                    reject({
+                                        error: 'Error while fetching Introspect token',
+                                        status: error.response.status,
+                                        errorMessage: error.response.data
+                                    });
+                                }
+
+                                reject("Error while fetching Introspect token " + error);
                             }
                         } else {
                             reject("RPT Request Failed");
                         }
                     } catch (error) {
-                        reject(error);
+
+                        if (error.response) {
+                            reject({
+                                error: 'Error while fetching RPT token, Please make sure all required Permissions & ' +
+                                    'Groups are assigned to User. For example, user with role agent must be assigned agents_permission group & all required permissions are created',
+                                status: error.response.status,
+                                errorMessage: error.response.data
+                            });
+                        }
+
+                        reject("Error while fetching RPT token " + error);
                     }
                 }
                 else {
                     reject("Access Token Request Failed");
                 }
             }
-            catch (er) {
-                reject(er);
+            catch (error) {
+
+                if (error.response) {
+                    reject({
+                        error: 'Error while generating Access Token',
+                        status: error.response.status,
+                        errorMessage: error.response.data
+                    });
+                }
+
+                reject("Error while generating Access Token " + error);
             }
         });
     }
@@ -679,42 +725,49 @@ class KeycloakService extends Keycloak {
 
                             let filteredTeams = groups.filter(group => !group.name.includes('_permission'));
 
+                            if (filteredTeams.length > 0) {
 
-                            userTeam = {
-                                'teamId': filteredTeams[0].id,
-                                'teamName': filteredTeams[0].name
-                            }
+                                userTeam = {
+                                    'teamId': filteredTeams[0].id,
+                                    'teamName': filteredTeams[0].name
+                                }
 
-                            team.userTeam = userTeam;
+                                team.userTeam = userTeam;
 
-                            config.method = 'get';
-                            delete config.data;
-                            delete config.url;
+                                config.method = 'get';
+                                delete config.data;
+                                delete config.url;
 
-                            let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups';
-                            config.url = URL3;
-                            config.headers.Authorization = 'Bearer ' + token;
+                                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups';
+                                config.url = URL3;
+                                config.headers.Authorization = 'Bearer ' + token;
 
-                            try {
+                                try {
 
-                                let allGroups = await requestController.httpRequest(config, true);
+                                    let allGroups = await requestController.httpRequest(config, true);
 
-                                for (let group of allGroups.data) {
+                                    for (let group of allGroups.data) {
 
-                                    let result = await teamsService.getGroupByGroupID(group.id, username, token, keycloakConfig);
+                                        let result = await teamsService.getGroupByGroupID(group.id, username, token, keycloakConfig);
 
-                                    if (result && !result.teamName.includes('_permission')) {
-                                        supervisedTeams.push(result);
-                                    }
-                                };
+                                        if (result && !result.teamName.includes('_permission')) {
+                                            supervisedTeams.push(result);
+                                        }
+                                    };
 
-                                team.supervisedTeams = supervisedTeams;
-                                resolve(team);
+                                    team.supervisedTeams = supervisedTeams;
+                                    resolve(team);
 
-                            } catch (er) {
+                                } catch (er) {
 
-                                error = await this.checkErrorType(er);
-                                reject(error);
+                                    error = await this.checkErrorType(er);
+                                    reject(error);
+                                }
+                            } else {
+                                reject({
+                                    status: 403,
+                                    errorMessage: 'No Teams group assigned to User, please assign one Team to user. If user has no team then assign it default group.'
+                                });
                             }
                         } else {
 
@@ -1220,10 +1273,16 @@ class KeycloakService extends Keycloak {
 
             }
             catch (err) {
-                reject({
-                    "status": err.response.status,
-                    "message": err.response.data.error_description
-                });
+
+                if (err.response) {
+                    reject({
+                        "status": err.response.status,
+                        "message": err.response.data
+                    });
+                }
+
+                reject('Error while assignment of roles to User: ' + err);
+
             }
 
         });
@@ -1233,7 +1292,7 @@ class KeycloakService extends Keycloak {
     async createUser(username, password, token, userRoles) {
 
         let assignRole = [];
-        let assignGroups = ['agents_permission', 'default'];
+        let assignGroups = userRoles.includes('supervisor') ? ["agents_permission", "default", "senior_agents_permission"] : ["agents_permission", "default"];
 
         return new Promise(async (resolve, reject) => {
 
@@ -1260,10 +1319,16 @@ class KeycloakService extends Keycloak {
 
                     }
                 } catch (err) {
-                    reject({
-                        "status": err.response.status,
-                        "message": err.response.data.error_description
-                    });
+
+                    if (err.response) {
+                        reject({
+                            "status": err.response.status,
+                            "message": err.response.data
+                        });
+                    }
+
+                    reject('Error while fetching group against group-name: ' + err);
+
                 }
 
             }
@@ -1281,7 +1346,7 @@ class KeycloakService extends Keycloak {
                         temporary: false
                     }
                 ],
-                groups: ["agents_permission", "default"]
+                groups: assignGroups
             }
 
             let config = {
@@ -1323,12 +1388,24 @@ class KeycloakService extends Keycloak {
                         });
                     }
 
-                    //assigning role to user
-                    let roleAssigned = await this.assignRoleToUser(userId, assignRole, token);
+                    try {
+                        //assigning role to user
+                        let roleAssigned = await this.assignRoleToUser(userId, assignRole, token);
 
-                    //Role assigned with status 
-                    if (roleAssigned.status == 204) {
-                        resolve(tokenResponse);
+                        //Role assigned with status 
+                        //Role assigned with status 
+                        //Role assigned with status 
+                        if (roleAssigned.status == 204) {
+                            resolve(tokenResponse);
+                        }
+                    } catch (err) {
+
+                        if (err.status) {
+                            reject(err);
+                        }
+
+                        reject('Error while Assignment of role to user: ' + err);
+
                     }
 
                 } else {
@@ -1340,10 +1417,15 @@ class KeycloakService extends Keycloak {
 
             }
             catch (err) {
-                reject({
-                    "status": err.response.status,
-                    "message": err.response.data.error_description
-                });
+
+                if (err.response) {
+                    reject({
+                        "status": err.response.status,
+                        "message": err.response.data
+                    });
+                }
+
+                reject('Error while Creation of User: ' + err);
             }
 
         });
@@ -1668,17 +1750,17 @@ class KeycloakService extends Keycloak {
 
             } catch (err) {
 
-                if (err.response.status == 401) {
+                if (err.status) {
 
-                    console.log("User doesn't exist in Keycloak, syncing finesse user in keycloak...");
+                    if (err.status == 401) {
+
+                        console.log("User doesn't exist in Keycloak, syncing finesse user in keycloak...");
+                    } else {
+                        throw (err);
+                    }
 
                 } else {
-
-                    throw ({
-                        "status": err.response.status,
-                        "message": err.response.data.error_description
-                    });
-
+                    throw ("Error while fetching keycloak User token: " + err);
                 }
 
             } finally {
@@ -1700,10 +1782,12 @@ class KeycloakService extends Keycloak {
                             });
 
                         } else {
-                            throw ({
-                                "status": err.response.status,
-                                "message": "Error While getting Keycloak admin token: " + err.response.data.error_description
-                            });
+
+                            if (err.status) {
+                                throw (err);
+                            }
+
+                            throw ("Error While getting Keycloak admin token: " + err);
                         }
 
                     }
@@ -1746,12 +1830,11 @@ class KeycloakService extends Keycloak {
 
                         } else {
 
-                            console.log(err);
+                            if (err.status) {
+                                throw (err);
+                            }
 
-                            throw ({
-                                "status": err.response.status,
-                                "message": "Error While creating Keycloak user: " + err.response.data.error_description
-                            });
+                            throw ("Error While creating Keycloak user: " + err);
                         }
                     }
                 }
@@ -1827,10 +1910,14 @@ class KeycloakService extends Keycloak {
 
         } else {
 
-            return ({
-                "status": err.response.status,
-                "message": "Error: " + err.response.data.error_description
-            });
+            if (err.response) {
+                return ({
+                    status: error.response.status,
+                    errorMessage: error.response.data
+                });
+            }
+
+            return (err);
         }
     }
 
