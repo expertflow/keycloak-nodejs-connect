@@ -171,8 +171,8 @@ class KeycloakService extends Keycloak {
 
                                             //Fetching Groups data for each user.
                                             try {
-
-                                                let teamData = await this.getUserSupervisedGroups(responseObject.id, responseObject.username);
+                                                let permissions = intrsopectionResponse.data.authorization.permissions;
+                                                let teamData = await this.getUserSupervisedGroups(responseObject.id, permissions);
                                                 responseObject.userTeam = teamData.userTeam;
                                                 responseObject.supervisedTeams = teamData.supervisedTeams;
 
@@ -670,8 +670,8 @@ class KeycloakService extends Keycloak {
         });
     }
 
-    //function to be used only in teams implementation
-    async getUserSupervisedGroups(userId, username) {
+    //function to be used only in teams implementation, this function contains teams implementation with permissions/policies
+    async getUserSupervisedGroups(userId, permissions) {
 
         return new Promise(async (resolve, reject) => {
 
@@ -721,7 +721,6 @@ class KeycloakService extends Keycloak {
 
                             let groups = userGroup.data;
                             let userTeam = {};
-                            let supervisedTeams = [];
 
                             let filteredTeams = groups.filter(group => !group.name.includes('_permission'));
 
@@ -738,31 +737,44 @@ class KeycloakService extends Keycloak {
                                 delete config.data;
                                 delete config.url;
 
-                                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups';
-                                config.url = URL3;
-                                config.headers.Authorization = 'Bearer ' + token;
 
-                                try {
+                                let teamPermission = permissions.filter(permission => permission.rsname == 'teams-dashboard');
+                                team.supervisedTeams = [];
 
-                                    let allGroups = await requestController.httpRequest(config, true);
+                                if (teamPermission.length > 0) {
 
-                                    for (let group of allGroups.data) {
+                                    let permissionScopes = teamPermission[0].scopes;
 
-                                        let result = await teamsService.getGroupByGroupID(group.id, username, token, keycloakConfig);
+                                    for (let scope of permissionScopes) {
+                                        let teamName = scope.split('-group');
 
-                                        if (result && !result.teamName.includes('_permission')) {
-                                            supervisedTeams.push(result);
+                                        let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups?search=' + teamName[0] + '&exact=true';
+                                        config.url = URL3
+
+                                        try {
+                                            let groupData = await requestController.httpRequest(config, true);
+
+                                            if (groupData.data.length > 0) {
+
+                                                let supervisedTeam = {
+                                                    'teamId': groupData.data[0].id,
+                                                    'teamName': groupData.data[0].name
+                                                }
+
+                                                team.supervisedTeams.push(supervisedTeam);
+                                            }
+                                        } catch {
+                                            error = await this.checkErrorType(er);
+                                            reject(error);
                                         }
-                                    };
+                                    }
 
-                                    team.supervisedTeams = supervisedTeams;
                                     resolve(team);
 
-                                } catch (er) {
-
-                                    error = await this.checkErrorType(er);
-                                    reject(error);
+                                } else {
+                                    resolve(team);
                                 }
+
                             } else {
                                 reject({
                                     status: 403,
