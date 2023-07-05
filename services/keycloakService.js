@@ -172,7 +172,8 @@ class KeycloakService extends Keycloak {
                                             //Fetching Groups data for each user.
                                             try {
                                                 let permissions = intrsopectionResponse.data.authorization.permissions;
-                                                let teamData = await this.getUserSupervisedGroups(responseObject.id, permissions);
+                                                let teamData = await this.getUserSupervisedGroups(responseObject.id, responseObject.username);
+                                                //let teamData = await this.getUserSupervisedGroups(responseObject.id, permissions);
                                                 responseObject.userTeam = teamData.userTeam;
                                                 responseObject.supervisedTeams = teamData.supervisedTeams;
 
@@ -670,7 +671,135 @@ class KeycloakService extends Keycloak {
         });
     }
 
+    //function to be used only in teams implementation
+    async getUserSupervisedGroups(userId, username) {
+
+        return new Promise(async (resolve, reject) => {
+
+            let error;
+            let token;
+            var URL = keycloakConfig["auth-server-url"] + 'realms/' + keycloakConfig.realm + '/protocol/openid-connect/token';
+
+            try {
+
+                var config = {
+                    method: 'post',
+                    url: URL,
+                    headers: {
+                        'Accept': 'application/json',
+                        'cache-control': 'no-cache',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    data: {
+                        client_id: keycloakConfig.CLIENT_ID,
+                        username: keycloakConfig.USERNAME_ADMIN,
+                        password: keycloakConfig.PASSWORD_ADMIN,
+                        grant_type: keycloakConfig.GRANT_TYPE,
+                        client_secret: keycloakConfig.credentials.secret
+                    }
+                };
+
+                try {
+
+                    let adminTokenResponse = await requestController.httpRequest(config, true);
+                    token = adminTokenResponse.data.access_token;
+
+                    config.method = 'get';
+                    delete config.data;
+                    delete config.url;
+
+                    let URL2 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/users/' + userId + '/groups';
+                    config.url = URL2;
+                    config.headers.Authorization = 'Bearer ' + token;
+
+                    try {
+
+                        let userGroup = await requestController.httpRequest(config, true);
+                        let team = {};
+
+                        if (userGroup.data.length != 0) {
+
+
+                            let groups = userGroup.data;
+                            let userTeam = {};
+                            let supervisedTeams = [];
+
+                            let filteredTeams = groups.filter(group => !group.name.includes('_permission'));
+
+                            if (filteredTeams.length > 0) {
+
+                                userTeam = {
+                                    'teamId': filteredTeams[0].id,
+                                    'teamName': filteredTeams[0].name
+                                }
+
+                                team.userTeam = userTeam;
+
+                                config.method = 'get';
+                                delete config.data;
+                                delete config.url;
+
+                                let URL3 = keycloakConfig["auth-server-url"] + 'admin/realms/' + keycloakConfig.realm + '/groups';
+                                config.url = URL3;
+                                config.headers.Authorization = 'Bearer ' + token;
+
+                                try {
+
+                                    let allGroups = await requestController.httpRequest(config, true);
+
+                                    for (let group of allGroups.data) {
+
+                                        let result = await teamsService.getGroupByGroupID(group.id, username, token, keycloakConfig);
+
+                                        if (result && !result.teamName.includes('_permission')) {
+                                            supervisedTeams.push(result);
+                                        }
+                                    };
+
+                                    team.supervisedTeams = supervisedTeams;
+                                    resolve(team);
+
+                                } catch (er) {
+
+                                    error = await this.checkErrorType(er);
+                                    reject(error);
+                                }
+                            } else {
+                                reject({
+                                    status: 403,
+                                    errorMessage: 'No Teams group assigned to User, please assign one Team to user. If user has no team then assign it default group.'
+                                });
+                            }
+                        } else {
+
+                            team.userTeam = {};
+                            team.supervisedTeams = [];
+
+                            resolve(team);
+                        }
+
+                    } catch (er) {
+
+                        error = await this.checkErrorType(er);
+                        reject(error);
+                    }
+                } catch (er) {
+
+                    error = await this.checkErrorType(er);
+                    reject(error);
+                }
+            } catch (er) {
+
+                error = await this.checkErrorType(er);
+                reject(error);
+            };
+        });
+
+    }
+
+    
     //function to be used only in teams implementation, this function contains teams implementation with permissions/policies
+    /*
     async getUserSupervisedGroups(userId, permissions) {
 
         return new Promise(async (resolve, reject) => {
@@ -807,6 +936,7 @@ class KeycloakService extends Keycloak {
         });
 
     }
+    */
 
     //function to be used only in teams implementation
     async getTeamUsers(keycloakObj, groupsIdsArr, userToken) {
@@ -1102,14 +1232,22 @@ class KeycloakService extends Keycloak {
 
                         } catch (err) {
 
-                            if (err.response) {
+                            if (err.response && err.response.status !== 404) {
+
                                 reject({
                                     status: err.response.status,
                                     errorMessage: err.response.data
                                 });
-                            }
 
-                            reject(err);
+                            } else if(err.message){
+
+                                if(err.message !== 'Request failed with status code 404'){
+                                    reject(err);
+                                }
+                                
+                            }else{
+                                continue;
+                            }
 
                         }
 
