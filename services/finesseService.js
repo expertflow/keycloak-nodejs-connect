@@ -1,20 +1,23 @@
-var requestController = require("../controller/requestController.js");
-const https = require('https');
+const parseXMLString = require( 'xml2js' ).parseString;
+const https = require( 'https' );
+
+var requestController = require( "../controller/requestController.js" );
 
 class FinesseService {
 
-    constructor() {
+    constructor () {
 
     }
 
 
-    async authenticateUserViaFinesse(username, password, finesseUrl) {
+    async authenticateUserViaFinesse( username, password, finesseUrl ) {
 
-        return new Promise(async (resolve, reject) => {
+        return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/User/' + username;
+            var URL = finesseUrl + '/finesse/api/User/' + 'shabbersup@ucce.ipcc';
+            let userObject = {};
 
-            let encodedCredentials = await this.maskCredentials(username, password);
+            let encodedCredentials = await this.maskCredentials( username, password );
 
             let config = {
                 method: 'get',
@@ -23,44 +26,79 @@ class FinesseService {
                     'Authorization': `Basic ${encodedCredentials}`
                 },
                 //disable ssl
-                httpsAgent: new https.Agent({ rejectUnauthorized: false })
+                httpsAgent: new https.Agent( { rejectUnauthorized: false } )
             };
 
             try {
 
-                let tokenResponse = await requestController.httpRequest(config, true);
+                let tokenResponse = await requestController.httpRequest( config, true );
 
-                resolve({
+                parseXMLString( tokenResponse.data, async ( err, result ) => {
+
+                    if ( err ) {
+                        console.error( err );
+                    } else {
+                        if ( result.User ) {
+
+                            let user = result.User;
+
+                            userObject = {
+                                username: user.loginName[ 0 ],
+                                firstName: user.firstName[ 0 ],
+                                lastName: user.lastName[ 0 ],
+                                roles: ( user.roles[ 0 ].role ).map( role => role.toLowerCase() ),
+                                group: ( user.teamName == '' || user.teamName == null ) ? [ 'default' ] : { id: user.teamId[ 0 ], name: user.teamName[ 0 ] }
+                            }
+
+                            if ( user.teams ) {
+
+                                if ( user.teams[ 0 ].Team ) {
+
+                                    userObject.supervisedGroups = ( user.teams[ 0 ].Team ).map( team => {
+                                        return {
+                                            id: team.id[ 0 ],
+                                            name: team.name[ 0 ]
+                                        }
+                                    } );
+                                }
+                            }
+                        }
+                    }
+                }
+                );
+
+                resolve( {
+                    'data': userObject,
                     'status': tokenResponse.status
-                });
+                } );
 
             }
-            catch (er) {
+            catch ( er ) {
 
-                if (er.code == "ENOTFOUND") {
+                if ( er.code == "ENOTFOUND" ) {
 
-                    resolve({
+                    reject( {
                         'finesse login status': 408,
                         'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
-                    });
+                    } );
 
-                } else if (er.response) {
+                } else if ( er.response ) {
 
-                    resolve({
+                    reject( {
                         'finesse login status': er.response.status,
                         'finesse login message': er.response.statusText
-                    });
+                    } );
 
                 }
 
             }
 
-        });
+        } );
     }
 
-    async authenticateUserViaFinesseSSO(username, finesseToken, finesseUrl) {
+    async authenticateUserViaFinesseSSO( username, finesseToken, finesseUrl ) {
 
-        return new Promise(async (resolve, reject) => {
+        return new Promise( async ( resolve, reject ) => {
 
             var URL = finesseUrl + '/finesse/api/User/' + username;
 
@@ -71,47 +109,47 @@ class FinesseService {
                     'Authorization': `Bearer ${finesseToken}`
                 },
                 //disable ssl
-                httpsAgent: new https.Agent({ rejectUnauthorized: false })
+                httpsAgent: new https.Agent( { rejectUnauthorized: false } )
             };
 
             try {
 
-                let tokenResponse = await requestController.httpRequest(config, true);
+                let tokenResponse = await requestController.httpRequest( config, true );
 
-                resolve({
+                resolve( {
                     'status': tokenResponse.status
-                });
+                } );
 
             }
-            catch (er) {
+            catch ( er ) {
 
-                if (er.code == "ENOTFOUND") {
+                if ( er.code == "ENOTFOUND" ) {
 
-                    resolve({
+                    reject( {
                         'finesse login status': 408,
                         'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
-                    });
+                    } );
 
-                } else if (er.response) {
+                } else if ( er.response ) {
 
-                    resolve({
+                    reject( {
                         'finesse login status': er.response.status,
                         'finesse login message': er.response.statusText
-                    });
+                    } );
 
                 }
             }
 
-        });
+        } );
     }
 
-    async getCiscoTeams(username, password, finesseUrl) {
+    async getCiscoTeams( username, password, finesseUrl ) {
 
-        return new Promise(async (resolve, reject) => {
+        return new Promise( async ( resolve, reject ) => {
 
             var URL = finesseUrl + '/finesse/api/Teams';
 
-            let encodedCredentials = await this.maskCredentials(username, password);
+            let encodedCredentials = await this.maskCredentials( username, password );
 
             let config = {
                 method: 'get',
@@ -120,46 +158,46 @@ class FinesseService {
                     'Authorization': `Basic ${encodedCredentials}`
                 },
                 //disable ssl
-                httpsAgent: new https.Agent({ rejectUnauthorized: false })
+                httpsAgent: new https.Agent( { rejectUnauthorized: false } )
             };
 
             try {
 
-                let tokenResponse = await requestController.httpRequest(config, true);
+                let tokenResponse = await requestController.httpRequest( config, true );
 
-                resolve(tokenResponse.data);
+                resolve( tokenResponse.data );
 
             }
-            catch (er) {
+            catch ( er ) {
 
-                if (er.code == "ENOTFOUND") {
+                if ( er.code == "ENOTFOUND" ) {
 
-                    resolve({
+                    resolve( {
                         'finesse login status': 408,
                         'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
-                    });
+                    } );
 
-                } else if (er.response) {
+                } else if ( er.response ) {
 
-                    resolve({
+                    resolve( {
                         'finesse login status': er.response.status,
                         'finesse login message': er.response.statusText
-                    });
+                    } );
 
                 }
 
             }
 
-        });
+        } );
     }
 
-    async getCiscoUsers(username, password, finesseUrl) {
+    async getCiscoUsers( username, password, finesseUrl ) {
 
-        return new Promise(async (resolve, reject) => {
+        return new Promise( async ( resolve, reject ) => {
 
             var URL = finesseUrl + '/finesse/api/Users';
 
-            let encodedCredentials = await this.maskCredentials(username, password);
+            let encodedCredentials = await this.maskCredentials( username, password );
 
             let config = {
                 method: 'get',
@@ -168,42 +206,42 @@ class FinesseService {
                     'Authorization': `Basic ${encodedCredentials}`
                 },
                 //disable ssl
-                httpsAgent: new https.Agent({ rejectUnauthorized: false })
+                httpsAgent: new https.Agent( { rejectUnauthorized: false } )
             };
 
             try {
 
-                let tokenResponse = await requestController.httpRequest(config, true);
+                let tokenResponse = await requestController.httpRequest( config, true );
 
-                resolve(tokenResponse.data);
+                resolve( tokenResponse.data );
 
             }
-            catch (er) {
+            catch ( er ) {
 
-                if (er.code == "ENOTFOUND") {
+                if ( er.code == "ENOTFOUND" ) {
 
-                    resolve({
+                    resolve( {
                         'finesse login status': 408,
                         'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
-                    });
+                    } );
 
-                } else if (er.response) {
+                } else if ( er.response ) {
 
-                    resolve({
+                    resolve( {
                         'finesse login status': er.response.status,
                         'finesse login message': er.response.statusText
-                    });
+                    } );
 
                 }
 
             }
 
-        });
+        } );
     }
 
-    async maskCredentials(username, password) {
+    async maskCredentials( username, password ) {
 
-        let token = Buffer.from(`${username}:${password}`, 'utf8').toString('base64');
+        let token = Buffer.from( `${username}:${password}`, 'utf8' ).toString( 'base64' );
         return token;
 
     }
