@@ -14,7 +14,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/User/' + 'shabbersup@ucce.ipcc';
+            var URL = finesseUrl + '/finesse/api/User/' + username;
             let userObject = {};
 
             let encodedCredentials = await this.maskCredentials( username, password );
