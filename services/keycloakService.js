@@ -1507,37 +1507,26 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/master/protocol/openid-connect/token";
 
-      let config = {
-
-        method: "post",
-        url: URL,
-        headers: {
-          Accept: "application/json",
-          "cache-control": "no-cache",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        data: {
-          username: "admin",
-          password: "admin",
-          client_id: "admin-cli",
-          grant_type: keycloakConfig.GRANT_TYPE || "password",
-        },
-
-      };
 
       try {
 
-        //  T.O.K.E.N   R.E.Q.U.E.S.T   # 1   ( P.E.R.M.I.S.S.I.O.N.S   N.O.T    I.N.C.L.U.D.E.D)
-        let adminTokenResponse = await requestController.httpRequest( config, true );
+        //Fetching admin token, we pass it in our "Create User" API for authorization
+        let keycloakAuthToken = await this.getAccessToken( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
 
-        if ( adminTokenResponse.data.access_token ) {
+        if ( keycloakAuthToken.access_token ) {
 
-          token = adminTokenResponse.data.access_token;
-          delete config.data;
-          config.method = "get";
-          config.headers.Authorization = "Bearer " + token;
+          token = keycloakAuthToken.access_token;
+
+          let config = {
+            method: "get",
+            headers: {
+              Accept: "application/json",
+              "cache-control": "no-cache",
+              "Content-Type": "application/x-www-form-urlencoded",
+              Authorization: `Bearer ${token}`
+            }
+          };
 
           let userObject = {}; // to read data object having all users of a certain role
           let count = 0;

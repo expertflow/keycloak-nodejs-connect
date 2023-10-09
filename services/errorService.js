@@ -8,7 +8,9 @@ class ErrorService {
 
     async handleError( err ) {
 
-        console.log( err );
+        if ( err.error_message && err.error_detail ) {
+            return err.error_detail;
+        }
 
         if ( err.code ) {
 
