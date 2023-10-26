@@ -27,6 +27,15 @@ class ErrorService {
                         reason: `Hostname Not Found, Keycloak server unaccessable against Keycloak URL. Unable to resolve Hostname, This maybe due to wrong Host URL or DNS server issue`,
                     };
                 default:
+
+                    if ( typeof ( err.response.data ) === "object" ) {
+
+                        return {
+                            status: err.response.status,
+                            reason: err.response.data.error
+                        }
+                    }
+
                     return {
                         status: err.response.status,
                         reason: err.response.data,
@@ -72,6 +81,15 @@ class ErrorService {
                                     reason: 'Provided User Credentials are not valid, please provide a valid User Credentials',
                                 };
                             default:
+
+                                if ( typeof ( err.response.data ) === "object" ) {
+
+                                    return {
+                                        status: err.response.status,
+                                        reason: err.response.data.error
+                                    }
+                                }
+
                                 return {
                                     status: err.response.status,
                                     reason: err.response.data,
@@ -80,6 +98,14 @@ class ErrorService {
                         }
 
                     } else {
+
+                        if ( typeof ( err.response.data ) === "object" ) {
+
+                            return {
+                                status: err.response.status,
+                                reason: err.response.data.error
+                            }
+                        }
 
                         return {
                             status: err.response.status,
