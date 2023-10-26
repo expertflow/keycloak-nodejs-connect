@@ -78,16 +78,22 @@ class FinesseService {
                 if ( er.code == "ENOTFOUND" ) {
 
                     reject( {
-                        'finesse login status': 408,
-                        'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
-                    } );
+                        error_message: "Error Occured While Authenticating User Via Finesse",
+                        error_detail: {
+                            status: 408,
+                            reason: `finesse server not accessible against URL: ${finesseUrl}`
+                        }
+                    } )
 
                 } else if ( er.response ) {
 
                     reject( {
-                        'finesse login status': er.response.status,
-                        'finesse login message': er.response.statusText
-                    } );
+                        error_message: "Error Occured While Authenticating User Via Finesse",
+                        error_detail: {
+                            status: er.response.status,
+                            reason: er.response.statusText
+                        }
+                    } )
 
                 }
 
@@ -126,16 +132,22 @@ class FinesseService {
                 if ( er.code == "ENOTFOUND" ) {
 
                     reject( {
-                        'finesse login status': 408,
-                        'finesse login message': `finesse server not accessible against URL: ${finesseUrl}`
-                    } );
+                        error_message: "Error Occured While Authenticating User Via Finesse SSO",
+                        error_detail: {
+                            status: 408,
+                            reason: `finesse server not accessible against URL: ${finesseUrl}`
+                        }
+                    } )
 
                 } else if ( er.response ) {
 
                     reject( {
-                        'finesse login status': er.response.status,
-                        'finesse login message': er.response.statusText
-                    } );
+                        error_message: "Error Occured While Authenticating User Via Finesse SSO",
+                        error_detail: {
+                            status: er.response.status,
+                            reason: er.response.statusText
+                        }
+                    } )
 
                 }
             }
