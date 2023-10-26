@@ -334,9 +334,12 @@ class KeycloakService extends Keycloak {
 
         if ( !userInfo.data.active ) {
 
-          resolve( {
-            status: 401,
-            message: "Provided User Access Token is Expired.",
+          reject( {
+            error_message: "Error Occured While Getting User Info From Token",
+            error_detail: {
+              status: 401,
+              reason: `Provided Access Token Expired. Please Provide Valid Access Token`
+            }
           } );
 
         }
@@ -344,9 +347,14 @@ class KeycloakService extends Keycloak {
         let clientRoles = userInfo.data.resource_access;
         resolve( clientRoles );
 
-      } catch ( error ) {
+      } catch ( er ) {
 
-        reject( error );
+        error = await errorService.handleError( er );
+
+        reject( {
+          error_message: "Error Occured While Getting User Info From Token",
+          error_detail: error
+        } );
       }
 
     } );
@@ -1108,10 +1116,7 @@ class KeycloakService extends Keycloak {
             error_message: "Error Occured While Fetching User Team.",
             error_detail: {
               status: 403,
-              reason: {
-                error: "access_denied",
-                error_description: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
-              }
+              reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
             }
           } );
 
