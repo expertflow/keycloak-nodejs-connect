@@ -1767,6 +1767,41 @@ class KeycloakService extends Keycloak {
 
   }
 
+  async getGroupById( groupId, adminToken ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/groups/${groupId}/`;
+
+      let config = {
+        method: "get",
+        url: URL,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        }
+      };
+
+      try {
+
+        let tokenResponse = await requestController.httpRequest( config, false );
+        let group = tokenResponse.data;
+        resolve( group );
+
+      } catch ( er ) {
+
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Error Occured While Fetching Group using GroupId.",
+          error_detail: error
+        } );
+      }
+
+    } );
+  }
+
   async addOrRemoveUserGroup( userId, groups, operation, adminToken ) {
 
 
@@ -2018,6 +2053,10 @@ class KeycloakService extends Keycloak {
 
               updateUserPromise = this.updateUser( finesseLoginResponse.data, keycloakAuthToken.keycloak_User )
                 .then( async ( updatedUser ) => {
+
+                  //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
+                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( username, password, keycloakConfig[ "realm" ] );
+                  keycloakAuthToken = null
                   keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( username, password, keycloakConfig[ "realm" ] );
                   updateUserPromise = null; // Reset the promise
                 } )
@@ -2217,6 +2256,66 @@ class KeycloakService extends Keycloak {
           let userLocationSplit = userLocation.split( "/" );
           let userId = userLocationSplit[ userLocationSplit.length - 1 ];
 
+          if ( userObject.roles.includes( "supervisor" ) ) {
+
+            try {
+
+              let clientId = await this.getClientId( token );
+
+              userObject.supervisedGroups.map( async ( group ) => {
+
+                let groupData = await this.gettingGroupByGroupName( [ group.name ], token );
+
+                if ( groupData.length > 0 ) {
+
+                  let groupDetails = await this.getGroupById( groupData[ 0 ].id, token );
+
+                  if ( groupDetails.attributes != null ) {
+
+                    if ( 'supervisor' in groupDetails.attributes ) {
+
+                      let supervisors = groupDetails.attributes[ 'supervisor' ][ 0 ].split( "," );
+
+                      if ( !( supervisors.includes( userObject.username ) ) ) {
+
+                        groupData[ 0 ].supervisor = [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
+                      }
+
+
+                    } else {
+
+                      groupData[ 0 ].supervisor = [ `${userObject.username}` ];
+                    }
+                  }
+
+                  if ( groupData[ 0 ].supervisor ) {
+                    await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+                  }
+
+                }
+
+                let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
+
+                if ( !userBasedPolicy.config.users.includes( userId ) ) {
+
+                  //Parsing string quoted array into array.
+                  const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
+                  delete userBasedPolicy.config;
+                  parsedArray.push( userId );
+
+                  userBasedPolicy.users = parsedArray;
+                  let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
+
+                }
+              } );
+
+            } catch ( er ) {
+
+              reject( er );
+            }
+
+          }
+
           //Get list of all the roles in keycloak realm
           let realmRoles = await this.getRealmRoles( token );
 
@@ -2415,6 +2514,233 @@ class KeycloakService extends Keycloak {
             if ( groupsToRemove.length > 0 ) {
 
               await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
+            }
+
+            try {
+
+              //Remove User From Supervising Group
+              if ( keyObj.permittedResources.Resources.length > 0 ) {
+
+                let clientId;
+
+                try {
+
+                  //Checking whether user has been assigned new groups to supervise or removed from some group as supervisor.
+                  clientId = await this.getClientId( token );
+
+                } catch ( err ) {
+
+                  reject( err );
+                }
+
+                try {
+
+                  let permissions = keyObj.permittedResources.Resources;
+
+                  let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
+
+                  if ( teamsDashboardPermissions && finObj.supervisedGroups.length > 0 ) {
+
+                    let userToRemoveFromPolicy;
+                    let userToAddInPolicy;
+                    let userAttributeToRemove;
+                    let userAttributeToAdd;
+
+                    let results = teamsDashboardPermissions.scopes.map( scope => {
+                      let groupName = scope.split( '-group' );
+                      return groupName[ 0 ];
+                    } );
+
+                    if ( finObj.supervisedGroups ) {
+
+                      userToRemoveFromPolicy = results.filter( group => !finObj.supervisedGroups.find( finGroup => finGroup.name == group ) );
+                    } else {
+
+                      userToRemoveFromPolicy = results;
+                    }
+
+                    //Checking Supervisors in attributes
+                    let teamsData = await this.getUserSupervisedGroups( keyObj.id, keyObj.username );
+
+                    try {
+
+                      //Removing Username in Supervisor Attribute from non-supervised teams. 
+                      if ( teamsData.supervisedTeams.length > 0 ) {
+
+                        //Filtering out all the non-supervised teams.
+                        if ( finObj.supervisedGroups ) {
+
+                          userAttributeToRemove = teamsData.supervisedTeams.filter( group => !finObj.supervisedGroups.find( finGroup => finGroup.name == group.teamName ) );
+                        } else {
+
+                          userAttributeToRemove = teamsData.supervisedTeams
+                        }
+
+                        if ( userAttributeToRemove.length > 0 ) {
+
+                          for ( let group of userAttributeToRemove ) {
+
+                            //Fetching non-supervised group
+                            let groupData = await this.gettingGroupByGroupName( [ group.teamName ], token );
+
+
+                            if ( groupData.length > 0 ) {
+
+                              //fetching detailed data of non-supervised group
+                              let groupDetails = await this.getGroupById( groupData[ 0 ].id, token );
+
+                              if ( groupDetails.attributes != null ) {
+
+                                //checking whether supervisor attribute exists in group
+                                if ( 'supervisor' in groupDetails.attributes ) {
+
+                                  let supervisors = groupDetails.attributes[ 'supervisor' ][ 0 ].split( "," );
+
+                                  //checking if current user is part of non-supervised group as supervisor
+                                  if ( supervisors.includes( keyObj.username ) ) {
+
+                                    let remainingSupervisors = supervisors.filter( supervisor => supervisor != ( keyObj.username ) );
+                                    groupData[ 0 ].supervisor = remainingSupervisors.length > 0 ? [ `${remainingSupervisors.join( ',' )}` ] : [ '' ];
+
+
+                                    try {
+                                      //removing user from non-supervised group.
+                                      let removeSupervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+                                    } catch ( err ) {
+
+                                      reject( err );
+                                    }
+                                  }
+
+                                }
+
+                              }
+                            }
+
+                          }
+                        }
+
+                      }
+
+                      //find Permission using Permission Name
+                      if ( userToRemoveFromPolicy.length > 0 ) {
+
+                        for ( let group of userToRemoveFromPolicy ) {
+
+
+                          let policy = await this.getPolicy( `${group} user based policy`, token, clientId );
+
+                          //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
+                          if ( policy.config.users.includes( keyObj.id ) ) {
+
+                            //Parsing string quoted array into array.
+                            let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
+                            let updatedParsedArray = parsedArray.filter( id => id != keyObj.id );
+
+                            delete policy.config;
+                            policy.users = updatedParsedArray;
+
+                            try {
+                              let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
+
+                            } catch ( er ) {
+                              reject( er );
+                            }
+
+                          }
+
+                        }
+                      }
+
+                      try {
+
+                        //Adding user as supervisor to new Teams.
+                        if ( finObj.supervisedGroups ) {
+
+                          userToAddInPolicy = finObj.supervisedGroups.filter( group => !results.includes( group.name ) );
+                          userAttributeToAdd = finObj.supervisedGroups.filter( group => !teamsData.supervisedTeams.find( keyGroup => group.name == keyGroup.teamName ) );
+
+                          if ( userAttributeToAdd.length > 0 ) {
+
+                            for ( let group of userAttributeToAdd ) {
+
+                              //Add User From Supervisor Attribute in Group.
+                              let groupData = await this.gettingGroupByGroupName( [ group.name ], token );
+
+                              if ( groupData.length > 0 ) {
+
+                                let groupDetails = await this.getGroupById( groupData[ 0 ].id, token );
+
+                                if ( groupDetails.attributes != null ) {
+
+                                  if ( 'supervisor' in groupDetails.attributes ) {
+
+                                    let supervisors = groupDetails.attributes[ 'supervisor' ][ 0 ].split( "," );
+
+                                    if ( !( supervisors.includes( finObj.username ) ) ) {
+
+                                      groupData[ 0 ].supervisor = ( supervisors[ 0 ] != '' ) ? [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${finObj.username}` ] : [ `${finObj.username}` ];
+                                    }
+                                  } else {
+
+                                    groupData[ 0 ].supervisor = [ `${finObj.username}` ];
+                                  }
+                                }
+
+                                if ( groupData[ 0 ].supervisor ) {
+                                  await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+                                }
+
+                              }
+                            }
+
+                          }
+
+                          if ( userToAddInPolicy.length > 0 ) {
+
+                            for ( let group of userToAddInPolicy ) {
+
+                              let policy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
+
+                              //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
+                              if ( !policy.config.users.includes( keyObj.id ) ) {
+
+                                //Parsing string quoted array into array.
+                                let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
+                                delete policy.config;
+                                parsedArray.push( keyObj.id );
+                                policy.users = parsedArray;
+
+                                try {
+                                  let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
+
+                                } catch ( er ) {
+                                  reject( er );
+                                }
+
+                              }
+
+                            }
+                          }
+                        }
+                      } catch ( err ) {
+
+                        reject( err );
+                      }
+                    }
+                    catch ( err ) {
+
+                      reject( err );
+                    }
+                  }
+                } catch ( err ) {
+
+                  reject( err );
+                }
+              }
+            } catch ( err ) {
+
+              reject( err );
             }
 
           } catch ( err ) {

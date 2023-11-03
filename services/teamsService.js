@@ -233,7 +233,7 @@ class TeamsService {
                         data: {
                             name: group.name,
                             attributes: {
-                                supervisor: group.supervisors
+                                supervisor: group.supervisor
                             }
                         }
                     };
