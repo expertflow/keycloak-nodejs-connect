@@ -2278,17 +2278,18 @@ class KeycloakService extends Keycloak {
 
                       if ( !( supervisors.includes( userObject.username ) ) ) {
 
-                        groupData[ 0 ].supervisor = [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
+                        groupDetails.attributes.supervisor = [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
                       }
-
 
                     } else {
 
-                      groupData[ 0 ].supervisor = [ `${userObject.username}` ];
+                      groupDetails.attributes.supervisor = [ `${userObject.username}` ];
                     }
                   }
 
-                  if ( groupData[ 0 ].supervisor ) {
+                  if ( groupDetails.attributes.supervisor ) {
+
+                    groupData[ 0 ] = groupDetails;
                     await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
                   }
 
@@ -2600,11 +2601,12 @@ class KeycloakService extends Keycloak {
                                   if ( supervisors.includes( keyObj.username ) ) {
 
                                     let remainingSupervisors = supervisors.filter( supervisor => supervisor != ( keyObj.username ) );
-                                    groupData[ 0 ].supervisor = remainingSupervisors.length > 0 ? [ `${remainingSupervisors.join( ',' )}` ] : [ '' ];
+                                    groupDetails.attributes.supervisor = remainingSupervisors.length > 0 ? [ `${remainingSupervisors.join( ',' )}` ] : [ '' ];
 
 
                                     try {
                                       //removing user from non-supervised group.
+                                      groupData[ 0 ] = groupDetails;
                                       let removeSupervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
                                     } catch ( err ) {
 
@@ -2679,15 +2681,17 @@ class KeycloakService extends Keycloak {
 
                                     if ( !( supervisors.includes( finObj.username ) ) ) {
 
-                                      groupData[ 0 ].supervisor = ( supervisors[ 0 ] != '' ) ? [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${finObj.username}` ] : [ `${finObj.username}` ];
+                                      groupDetails.attributes.supervisor = ( supervisors[ 0 ] != '' ) ? [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${finObj.username}` ] : [ `${finObj.username}` ];
                                     }
                                   } else {
 
-                                    groupData[ 0 ].supervisor = [ `${finObj.username}` ];
+                                    groupDetails.attributes.supervisor = [ `${finObj.username}` ];
                                   }
                                 }
 
-                                if ( groupData[ 0 ].supervisor ) {
+                                if ( groupDetails.attributes.supervisor ) {
+
+                                  groupData[ 0 ] = groupDetails;
                                   await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
                                 }
 
