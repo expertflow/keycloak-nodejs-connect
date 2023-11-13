@@ -26,20 +26,28 @@ class ErrorService {
                         status: 404,
                         reason: `Hostname Not Found, Keycloak server unaccessable against Keycloak URL. Unable to resolve Hostname, This maybe due to wrong Host URL or DNS server issue`,
                     };
+                case 'EHOSTUNREACH':
+                    return {
+                        status: 404,
+                        reason: `Hostname Not Found, Keycloak server unaccessable against Keycloak URL. Unable to resolve Hostname, This maybe due to wrong Host URL or DNS server issue`,
+                    };
                 default:
 
-                    if ( typeof ( err.response.data ) === "object" ) {
+                    if ( err.response ) {
+
+                        if ( typeof ( err.response.data ) === "object" ) {
+
+                            return {
+                                status: err.response.status,
+                                reason: err.response.data.error
+                            }
+                        }
 
                         return {
                             status: err.response.status,
-                            reason: err.response.data.error
-                        }
+                            reason: err.response.data,
+                        };
                     }
-
-                    return {
-                        status: err.response.status,
-                        reason: err.response.data,
-                    };
             }
 
         } else {
