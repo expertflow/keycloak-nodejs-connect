@@ -6,57 +6,6 @@ class TeamsService {
 
     }
 
-    //This function is being used inside getUserSupervisedGroups()
-    async getGroupByGroupID( groupId, username, token, keycloakConfig ) {
-
-        return new Promise( async ( resolve, reject ) => {
-
-            let URL = keycloakConfig[ "auth-server-url" ] + 'admin/realms/' + keycloakConfig.realm + '/groups/' + groupId + '/';
-
-            var config = {
-                method: 'get',
-                url: URL,
-                headers: {
-                    'Accept': 'application/json',
-                    'cache-control': 'no-cache',
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                headers: {
-                    'Authorization': 'Bearer ' + token
-                }
-            };
-
-            try {
-
-                let groupAttributes = await requestController.httpRequest( config, false );
-                let attributes = groupAttributes.data.attributes;
-
-                if ( attributes != null ) {
-
-                    if ( 'supervisor' in attributes ) {
-
-                        let supervisors = attributes[ 'supervisor' ][ 0 ].split( "," );
-
-                        if ( supervisors.includes( username ) ) {
-
-                            resolve( {
-                                'teamId': groupAttributes.data.id,
-                                'teamName': groupAttributes.data.name
-                            } );
-                        }
-                    }
-                }
-
-                resolve( null );
-
-            } catch ( error ) {
-
-                reject( error );
-            }
-
-        } );
-    }
-
     //this function is being used inside getTeamUsers()
     async getUsersOfGroups( groups, config, keycloakConfig ) {
 
