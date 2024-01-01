@@ -1,0 +1,23 @@
+{
+  "name": "ef-keycloak-connect",
+  "version": "1.6.7",
+  "description": "Node JS keycloak adapter for authentication and authorization.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/expertflow/keycloak-nodejs-connect/tree/CIM"
+  },
+  "author": "saqib",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.21.0",
+    "express": "^4.17.1",
+    "express-session": "^1.17.2",
+    "joi": "^17.6.0",
+    "keycloak-connect": "^10.0.2",
+    "xml2js": "^0.5.0"
+  }
+}
