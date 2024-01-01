@@ -290,8 +290,7 @@ class KeycloakService extends Keycloak {
                         //Fetching Groups data for each user.
                         try {
 
-                          let permissions = intrsopectionResponse.data.authorization.permissions;
-                          let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.attributes, intrsopectionResponse.data.realm_access.roles, token, permissions );
+                          let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, responseObject.roles, token );
 
                           //Getting role against permission group
                           let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
@@ -1113,7 +1112,7 @@ class KeycloakService extends Keycloak {
   }
 
   //function to be used only in teams implementation
-  async getUserSupervisedGroups( userId, attributes, roles, adminToken, permissions ) {
+  async getUserSupervisedGroups( userId, username, roles, adminToken ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -1171,6 +1170,7 @@ class KeycloakService extends Keycloak {
 
               team.userTeam = userTeam;
 
+              /*
               if ( permissions.length > 0 ) {
 
                 let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
@@ -1185,9 +1185,7 @@ class KeycloakService extends Keycloak {
 
               }
 
-              //if ( supervisedGroupsName.length > 0 ) {
-
-              try {
+               try {
 
                 supervisedTeams = await this.gettingGroupByGroupName( supervisedGroupsName, adminToken );
 
@@ -1200,50 +1198,51 @@ class KeycloakService extends Keycloak {
                   error_detail: error
                 } );
 
-              }
-              //} else {
+              } */
 
-              delete config.url;
+              if ( roles.includes( 'supervisor' ) ) {
 
-              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
-              config.url = URL2;
-              config.headers.Authorization = "Bearer " + adminToken;
+                delete config.url;
 
-              try {
+                let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
+                config.url = URL2;
+                config.headers.Authorization = "Bearer " + adminToken;
 
-                let allGroups = await requestController.httpRequest( config, true );
+                try {
 
-                for ( let group of allGroups.data ) {
+                  let allGroups = await requestController.httpRequest( config, true );
 
-                  if ( group.attributes != null ) {
+                  for ( let group of allGroups.data ) {
 
-                    if ( 'supervisor' in group.attributes ) {
+                    if ( group.attributes != null ) {
 
-                      let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
+                      if ( 'supervisor' in group.attributes ) {
 
-                      if ( supervisors.includes( attributes.user_name[ 0 ] ) && !group.name.includes( "_permission" ) ) {
+                        let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
 
-                        supervisedTeams.push( {
-                          'teamId': group.id,
-                          'teamName': group.name
-                        } );
+                        if ( supervisors.includes( username ) && !group.name.includes( "_permission" ) ) {
+
+                          supervisedTeams.push( {
+                            'teamId': group.id,
+                            'teamName': group.name
+                          } );
+                        }
                       }
                     }
+
                   }
 
+                } catch ( er ) {
+
+                  error = await errorService.handleError( er );
+
+                  reject( {
+                    error_message: "Error Occured While Fetching User Supervised Teams.",
+                    error_detail: error
+                  } );
+
                 }
-
-              } catch ( er ) {
-
-                error = await errorService.handleError( er );
-
-                reject( {
-                  error_message: "Error Occured While Fetching User Supervised Teams.",
-                  error_detail: error
-                } );
-
               }
-              //}
 
               team.supervisedTeams = supervisedTeams;
               resolve( team );
@@ -2242,13 +2241,13 @@ class KeycloakService extends Keycloak {
     let assignRole = [];
     let assignGroups = [];
 
-    if ( !keycloakConfig[ "TEAMS_ENABLED" ] ) {
+    /* if ( !keycloakConfig[ "TEAMS_ENABLED" ] ) {
 
       assignGroups = userObject.roles.includes( "supervisor" ) ? [ "Default", "agents_permission", "senior_agents_permission" ] : [ "Default", "agents_permission" ];
-    } else {
+    } else { */
 
-      assignGroups = userObject.roles.includes( "supervisor" ) ? [ userObject.group.name, "agents_permission", "senior_agents_permission" ] : [ userObject.group.name, "agents_permission" ];
-    }
+    assignGroups = userObject.roles.includes( "supervisor" ) ? [ userObject.group.name, "agents_permission", "senior_agents_permission" ] : [ userObject.group.name, "agents_permission" ];
+
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -2297,59 +2296,67 @@ class KeycloakService extends Keycloak {
           let userLocationSplit = userLocation.split( "/" );
           let userId = userLocationSplit[ userLocationSplit.length - 1 ];
 
-          if ( userObject.roles.includes( "supervisor" ) && keycloakConfig[ "TEAMS_ENABLED" ] ) {
+          if ( userObject.roles.includes( "supervisor" ) ) {
+
+            let URL1 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/groups?max=10000&briefRepresentation=false";
+
+            delete config.data;
+            config.url = URL1;
+            config.method = 'get';
+            config.headers.Authorization = "Bearer " + token;
 
             try {
 
+              let groups = await requestController.httpRequest( config, false );
               let clientId = await this.getClientId( token );
 
-              await Promise.all( userObject.supervisedGroups.map( async ( group ) => {
+              let supervisedGroups = groups.data.filter( group => userObject.supervisedGroups.find( finesseSup => finesseSup.name == group.name ) );
 
-                /* let groupData = await this.gettingGroupByGroupName( [ group.name ], token );
+              if ( supervisedGroups.length > 0 ) {
 
-                if ( groupData.length > 0 ) {
+                await Promise.all( supervisedGroups.map( async ( group ) => {
 
-                  let groupDetails = await this.getGroupById( groupData[ 0 ].id, token );
+                  let groupData = [];
 
-                  if ( groupDetails.attributes != null ) {
+                  if ( group.attributes != null ) {
 
-                    if ( 'supervisor' in groupDetails.attributes ) {
+                    if ( 'supervisor' in group.attributes ) {
 
-                      let supervisors = groupDetails.attributes[ 'supervisor' ][ 0 ].split( "," );
+                      let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
 
                       if ( !( supervisors.includes( userObject.username ) ) ) {
 
-                        groupDetails.attributes.supervisor = [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
+                        group.attributes.supervisor = [ ` ${group.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
                       }
 
                     } else {
 
-                      groupDetails.attributes.supervisor = [ `${userObject.username}` ];
+                      group.attributes.supervisor = [ `${userObject.username}` ];
                     }
                   }
 
-                  if ( groupDetails.attributes.supervisor ) {
+                  if ( group.attributes.supervisor ) {
 
-                    groupData[ 0 ] = groupDetails;
+                    groupData[ 0 ] = group;
                     await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
                   }
 
-                } */
+                  let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
 
-                let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
+                  if ( !userBasedPolicy.config.users.includes( userId ) ) {
 
-                if ( !userBasedPolicy.config.users.includes( userId ) ) {
+                    //Parsing string quoted array into array.
+                    const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
+                    delete userBasedPolicy.config;
+                    parsedArray.push( userId );
 
-                  //Parsing string quoted array into array.
-                  const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
-                  delete userBasedPolicy.config;
-                  parsedArray.push( userId );
+                    userBasedPolicy.users = parsedArray;
+                    let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
 
-                  userBasedPolicy.users = parsedArray;
-                  let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
+                  }
 
-                }
-              } ) );
+                } ) );
+              }
 
             } catch ( er ) {
 
@@ -2448,13 +2455,14 @@ class KeycloakService extends Keycloak {
 
       let data = {};
       let userAttributes;
-      let assignRole = [];
+      let groupData = [];
 
       let rolesToAdd;
       let rolesToRemove;
       let groupsToAdd;
       let groupsToRemove;
       let keycloakGroups;
+      let supervisedKeycloakTeams = [];
 
 
       try {
@@ -2570,21 +2578,17 @@ class KeycloakService extends Keycloak {
 
           let token = keycloakAdminToken.access_token;
 
-          if ( keycloakConfig[ "TEAMS_ENABLED" ] ) {
+          let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
 
-            let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
+          keycloakGroups = userGroups.map( group => {
+            return {
+              id: group.id,
+              name: group.name
+            }
+          } );
 
-            keycloakGroups = userGroups.map( group => {
-              return {
-                id: group.id,
-                name: group.name
-              }
-            } );
-
-            groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
-            groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group.name ) );
-          }
-
+          groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
+          groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group.name ) );
 
           //Adding and Removing Roles from Keycloak
           try {
@@ -2616,104 +2620,257 @@ class KeycloakService extends Keycloak {
 
             try {
 
-              if ( keycloakConfig[ "TEAMS_ENABLED" ] ) {
+
+              if ( groupsToAdd.length > 0 ) {
+
+                //Fetching Ids of all the groups to add to current Keycloak User.
+                groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
+                await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
+              }
+
+              if ( groupsToRemove.length > 0 ) {
+
+                await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
+              }
+
+              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
+              config.url = URL2;
+              config.method = 'get';
+              delete config.data;
+
+              try {
+
+                //Getting all the Cisco Teams that exist in keycloak.
+                let groupsResponse = await requestController.httpRequest( config, false );
+                let groupList = groupsResponse.data;
+
+                let ciscoTeams = groupList.filter( ( group ) => {
+                  return Object.keys( group.attributes ).includes( 'ciscoTeamId' )
+                } ).map( group => { return { id: group.id, name: group.name, attributes: group.attributes } } );
+
+                //Remove User From Supervising Group
+                if ( keyObj.permittedResources.Resources.length > 0 ) {
+
+                  try {
+
+                    let permissions = keyObj.permittedResources.Resources;
+
+                    let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
 
 
-                if ( groupsToAdd.length > 0 ) {
+                    if ( teamsDashboardPermissions || finObj.supervisedGroups ) {
 
-                  //Fetching Ids of all the groups to add to current Keycloak User.
-                  groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
-                  await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
-                }
+                      let clientId;
 
-                if ( groupsToRemove.length > 0 ) {
+                      try {
 
-                  await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
-                }
+                        //Checking whether user has been assigned new groups to supervise or removed from some group as supervisor.
+                        clientId = await this.getClientId( token );
 
-                let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
-                config.url = URL2;
-                config.method = 'get';
-                delete config.data;
+                      } catch ( err ) {
 
-                try {
+                        reject( err );
+                      }
 
-                  //Getting all the Cisco Teams that exist in keycloak.
-                  let groupsResponse = await requestController.httpRequest( config, false );
-                  let groupList = groupsResponse.data;
+                      let userToRemoveFromPolicy;
+                      let userToAddInPolicy;
+                      let results = [];
 
-                  let ciscoTeams = groupList.filter( ( group ) => {
-                    return Object.keys( group.attributes ).includes( 'ciscoTeamId' )
-                  } ).map( group => { return { id: group.id, name: group.name } } );
+                      if ( teamsDashboardPermissions ) {
 
-                  //Remove User From Supervising Group
-                  if ( keyObj.permittedResources.Resources.length > 0 ) {
+                        results = teamsDashboardPermissions.scopes.map( scope => {
+                          let groupName = scope.split( '-group' );
+                          return groupName[ 0 ];
+                        } );
+                      }
 
-                    try {
+                      //Filtering out only Cisco Teams in result array, so no keycloak teams are removed.
+                      results = results.filter( result => {
+                        return ciscoTeams.some( ( team ) => team.name === result );
+                      } );
 
-                      let permissions = keyObj.permittedResources.Resources;
+                      if ( finObj.supervisedGroups && results.length > 0 ) {
 
-                      let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
+                        userToRemoveFromPolicy = results.filter( group => !finObj.supervisedGroups.find( finGroup => finGroup.name == group ) );
+                      } else {
 
+                        userToRemoveFromPolicy = results;
+                      }
 
-                      if ( teamsDashboardPermissions || finObj.supervisedGroups ) {
+                      ciscoTeams.forEach( ( group ) => {
 
-                        let clientId;
+                        const { attributes, id, name } = group;
 
-                        try {
+                        if (
+                          attributes &&
+                          attributes.supervisor &&
+                          attributes.supervisor[ 0 ].split( ',' ).includes( finObj.username ) &&
+                          !name.includes( '_permission' )
+                        ) {
 
-                          //Checking whether user has been assigned new groups to supervise or removed from some group as supervisor.
-                          clientId = await this.getClientId( token );
-
-                        } catch ( err ) {
-
-                          reject( err );
-                        }
-
-                        let userToRemoveFromPolicy;
-                        let userToAddInPolicy;
-                        let results = [];
-
-                        if ( teamsDashboardPermissions ) {
-
-                          results = teamsDashboardPermissions.scopes.map( scope => {
-                            let groupName = scope.split( '-group' );
-                            return groupName[ 0 ];
+                          supervisedKeycloakTeams.push( {
+                            id: id,
+                            name: name,
+                            attributes
                           } );
                         }
 
-                        //Filtering out only Cisco Teams in result array, so no keycloak teams are removed.
-                        results = results.filter( result => {
-                          return ciscoTeams.some( ( team ) => team.name === result );
-                        } );
+                      } );
 
-                        if ( finObj.supervisedGroups && results.length > 0 ) {
+                      //Adding or Removing current user from supervisor attribute of teams (Assinging/Removing Teams to supervise)
+                      let userAttributeToRemove;
+                      let userAttributeToAdd;
 
-                          userToRemoveFromPolicy = results.filter( group => !finObj.supervisedGroups.find( finGroup => finGroup.name == group ) );
+                      //Removing Username in Supervisor Attribute from non-supervised teams. 
+                      if ( supervisedKeycloakTeams.length > 0 ) {
+
+                        //Filtering out all the non-supervised teams.
+                        if ( finObj.supervisedGroups ) {
+
+                          userAttributeToRemove = supervisedKeycloakTeams.filter( group => finObj.supervisedGroups.find( finGroup => finGroup.name != group.name ) );
                         } else {
 
-                          userToRemoveFromPolicy = results;
+                          userAttributeToRemove = supervisedKeycloakTeams
                         }
 
-                        //find Permission using Permission Name
-                        if ( userToRemoveFromPolicy.length > 0 ) {
+                        if ( userAttributeToRemove.length > 0 ) {
 
-                          const removalPromises = [];
+                          for ( let group of userAttributeToRemove ) {
 
-                          for ( let group of userToRemoveFromPolicy ) {
+                            if ( group.attributes != null ) {
 
-                            let removalPolicyPromise = ( async () => {
-                              let policy = await this.getPolicy( `${group} user based policy`, token, clientId );
+                              //checking whether supervisor attribute exists in group
+                              if ( 'supervisor' in group.attributes ) {
+
+                                let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
+
+                                //checking if current user is part of non-supervised group as supervisor
+                                if ( supervisors.includes( ( finObj.username ).toString() ) ) {
+
+                                  let remainingSupervisors = supervisors.filter( supervisor => supervisor != ( keyObj.username ) );
+                                  group.attributes.supervisor = remainingSupervisors.length > 0 ? [ `${remainingSupervisors.join( ',' )}` ] : [ '' ];
+
+                                  try {
+                                    //removing user from non-supervised group.
+                                    groupData[ 0 ] = group;
+                                    let removeSupervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+
+                                  } catch ( err ) {
+
+                                    reject( err );
+                                  }
+                                }
+
+                              }
+
+                            }
+
+                          }
+                        }
+
+                      }
+
+                      //find Permission using Permission Name
+                      if ( userToRemoveFromPolicy.length > 0 ) {
+
+                        const removalPromises = [];
+
+                        for ( let group of userToRemoveFromPolicy ) {
+
+                          let removalPolicyPromise = ( async () => {
+                            let policy = await this.getPolicy( `${group} user based policy`, token, clientId );
+
+                            //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
+                            if ( policy.config.users.includes( keyObj.id ) ) {
+
+                              //Parsing string quoted array into array.
+                              let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
+                              let updatedParsedArray = parsedArray.filter( id => id != keyObj.id );
+
+                              delete policy.config;
+                              policy.users = updatedParsedArray;
+
+                              try {
+                                let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
+
+                              } catch ( er ) {
+                                reject( er );
+                              }
+
+                            }
+
+                          } )();
+
+                          removalPromises.push( removalPolicyPromise );
+                        }
+
+                        // Wait for all promises to complete before moving on
+                        await Promise.all( removalPromises );
+
+                      }
+
+
+                      try {
+
+                        //Adding user as supervisor to new Teams.
+                        if ( finObj.supervisedGroups ) {
+
+                          userToAddInPolicy = finObj.supervisedGroups.filter( group => !results.includes( group.name ) );
+                          userAttributeToAdd = finObj.supervisedGroups.filter( finGroup => !supervisedKeycloakTeams.find( group => finGroup.name == group.name ) );
+
+                          if ( userAttributeToAdd.length > 0 ) {
+
+                            for ( let group of userAttributeToAdd ) {
+
+                              //Getting Supervisor attribute of current group
+                              group = ciscoTeams.find( keyGroup => keyGroup.name == group.name );
+
+                              if ( group.attributes != null ) {
+
+                                if ( 'supervisor' in group.attributes ) {
+
+                                  let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
+
+                                  if ( !( supervisors.includes( finObj.username ) ) ) {
+
+                                    group.attributes.supervisor = ( supervisors[ 0 ] != '' ) ? [ ` ${group.attributes[ 'supervisor' ][ 0 ]},${finObj.username}` ] : [ `${finObj.username}` ];
+                                  }
+                                } else {
+
+                                  group.attributes.supervisor = [ `${finObj.username}` ];
+                                }
+                              }
+
+                              if ( group.attributes.supervisor ) {
+
+                                groupData[ 0 ] = group;
+                                await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+                              }
+
+
+                            }
+
+                          }
+
+                        }
+
+                        if ( userToAddInPolicy.length > 0 ) {
+
+                          const additionPromises = [];
+
+                          for ( let group of userToAddInPolicy ) {
+
+                            let additionPolicyPromise = ( async () => {
+                              let policy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
 
                               //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
-                              if ( policy.config.users.includes( keyObj.id ) ) {
+                              if ( !policy.config.users.includes( keyObj.id ) ) {
 
                                 //Parsing string quoted array into array.
                                 let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
-                                let updatedParsedArray = parsedArray.filter( id => id != keyObj.id );
-
                                 delete policy.config;
-                                policy.users = updatedParsedArray;
+                                parsedArray.push( keyObj.id );
+                                policy.users = parsedArray;
 
                                 try {
                                   let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
@@ -2723,86 +2880,39 @@ class KeycloakService extends Keycloak {
                                 }
 
                               }
-
                             } )();
 
-                            removalPromises.push( removalPolicyPromise );
+                            additionPromises.push( additionPolicyPromise );
+
                           }
 
                           // Wait for all promises to complete before moving on
-                          await Promise.all( removalPromises );
+                          await Promise.all( additionPromises );
 
                         }
 
+                      } catch ( err ) {
 
-                        try {
-
-                          //Adding user as supervisor to new Teams.
-                          if ( finObj.supervisedGroups ) {
-
-                            userToAddInPolicy = finObj.supervisedGroups.filter( group => !results.includes( group.name ) );
-
-                          }
-
-                          if ( userToAddInPolicy.length > 0 ) {
-
-                            const additionPromises = [];
-
-                            for ( let group of userToAddInPolicy ) {
-
-                              let additionPolicyPromise = ( async () => {
-                                let policy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
-
-                                //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
-                                if ( !policy.config.users.includes( keyObj.id ) ) {
-
-                                  //Parsing string quoted array into array.
-                                  let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
-                                  delete policy.config;
-                                  parsedArray.push( keyObj.id );
-                                  policy.users = parsedArray;
-
-                                  try {
-                                    let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
-
-                                  } catch ( er ) {
-                                    reject( er );
-                                  }
-
-                                }
-                              } )();
-
-                              additionPromises.push( additionPolicyPromise );
-
-                            }
-
-                            // Wait for all promises to complete before moving on
-                            await Promise.all( additionPromises );
-
-                          }
-
-                        } catch ( err ) {
-
-                          reject( err );
-                        }
+                        reject( err );
                       }
-                    } catch ( err ) {
-
-                      reject( err );
                     }
+                  } catch ( err ) {
 
+                    reject( err );
                   }
-                } catch ( err ) {
 
-                  let error = await errorService.handleError( err );
-
-                  reject( {
-
-                    error_message: "Error Occured While Fetching Keycloak Groups List during Cisco User Sync Update Process.",
-                    error_detail: error
-                  } );
                 }
+              } catch ( err ) {
+
+                let error = await errorService.handleError( err );
+
+                reject( {
+
+                  error_message: "Error Occured While Fetching Keycloak Groups List during Cisco User Sync Update Process.",
+                  error_detail: error
+                } );
               }
+
             } catch ( err ) {
 
               reject( err );
