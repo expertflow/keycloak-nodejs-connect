@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# keyloak-adapter
-=======
 # Node JS adapter for keycloak
 Keycloak is an Open Source Identity and Access Management solution for modern Applications and Services.
 
@@ -363,4 +360,3 @@ Response:
    }
       
        
->>>>>>> origin/CIM
