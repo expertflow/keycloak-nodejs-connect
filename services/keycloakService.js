@@ -12,6 +12,7 @@ let realmRoles = [];
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
+const { response } = require( "express" );
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
@@ -2119,6 +2120,8 @@ class KeycloakService extends Keycloak {
 
             try {
 
+              await this.checkPasswordUpdate( keycloakAdminToken.access_token, finesseLoginResponse.data.username, password );
+
               //Checking whether finesse user already exist in keycloak and fetch its token
               keycloakAuthToken = await this.getAccessToken( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
               authenticatedByKeycloak = true;
@@ -2931,6 +2934,82 @@ class KeycloakService extends Keycloak {
       }
 
       resolve( [] );
+    } );
+  }
+
+  async checkPasswordUpdate( adminToken, userName, password ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false"
+
+      let config = {
+        method: "get",
+        url: URL,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        }
+      };
+
+      try {
+
+        //First check if the user exists or not in Keycloak, search user by username in Keycloak.
+        let userResponse = await requestController.httpRequest( config, false );
+
+        if ( userResponse.data.length > 0 ) {
+
+          //Since user exists against username, now generate its access-token.
+          /*
+            If the access token is not generated, it means that password on
+            Keycloak side is not valid and should be updated.
+          */
+          try {
+
+            let tokenResponse = await this.getAccessToken( userName, password );
+
+            if ( tokenResponse.access_token ) {
+
+              resolve( [] );
+            }
+
+          } catch ( er ) {
+
+            if ( er.error_detail.status == 401 ) {
+
+              console.log( 'Keycloak Password Update Process Started...' );
+
+            } else {
+
+              let error = await errorService.handleError( er );
+
+              reject( {
+
+                error_message: "Error Occured While Generating User Access Token in Check Updated Password Component.",
+                error_detail: error
+              } );
+            }
+
+          } finally {
+
+            console.log( 'here...' );
+          }
+
+
+        }
+
+        resolve( [] );
+
+      } catch ( er ) {
+
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Error Occured While Searching for User by Username in Check Updated Password Component.",
+          error_detail: error
+        } );
+      }
     } );
   }
 
