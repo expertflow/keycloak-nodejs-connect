@@ -287,16 +287,24 @@ class KeycloakService extends Keycloak {
                         delete config.headers.Authorization;
                         delete config.data;
 
+                        console.log( responseObject );
+
                         //Fetching Groups data for each user.
                         try {
 
                           let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, responseObject.roles, token );
+                          console.log( teamData );
 
                           //Getting role against permission group
                           let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
                             teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
 
-                          let hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
+                          let hasRole;
+
+                          if ( isRole ) {
+                            hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
+                          }
+
 
                           //checking if required roles are assigned to user or not.
                           if ( isRole && !hasRole ) {
