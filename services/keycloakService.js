@@ -294,16 +294,20 @@ class KeycloakService extends Keycloak {
 
                           //Getting role against permission group
                           let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? 'supervisor' : 'agent' ) ) : undefined;
+                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+
+                          let hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
 
                           //checking if required roles are assigned to user or not.
-                          if ( isRole && !responseObject.roles.includes( isRole ) ) {
+                          if ( isRole && !hasRole ) {
 
                             reject( {
                               error_message: "Error Occured While Generating User Access Token",
                               error_detail: {
                                 status: 403,
-                                reason: `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
+                                reason: ( isRole.length > 1 ) ?
+                                  `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
+                                  `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
                               }
                             } );
                           }
