@@ -295,16 +295,25 @@ class KeycloakService extends Keycloak {
 
                           //Getting role against permission group
                           let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? 'supervisor' : 'agent' ) ) : undefined;
+                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+
+                          let hasRole;
+
+                          if ( isRole ) {
+                            hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
+                          }
+
 
                           //checking if required roles are assigned to user or not.
-                          if ( isRole && !responseObject.roles.includes( isRole ) ) {
+                          if ( isRole && !hasRole ) {
 
                             reject( {
                               error_message: "Error Occured While Generating User Access Token",
                               error_detail: {
                                 status: 403,
-                                reason: `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
+                                reason: ( isRole.length > 1 ) ?
+                                  `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
+                                  `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
                               }
                             } );
                           }
@@ -2941,6 +2950,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
+      let passwordUpdate = false;
       var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false"
 
       let config = {
@@ -2969,6 +2979,7 @@ class KeycloakService extends Keycloak {
             let tokenResponse = await this.getAccessToken( userName, password );
 
             if ( tokenResponse.access_token ) {
+              console.log( 'here' );
 
               resolve( [] );
             }
@@ -2977,6 +2988,7 @@ class KeycloakService extends Keycloak {
 
             if ( er.error_detail.status == 401 ) {
 
+              passwordUpdate = true;
               console.log( 'Keycloak Password Update Process Started...' );
 
             } else {
@@ -2992,19 +3004,49 @@ class KeycloakService extends Keycloak {
 
           } finally {
 
-            console.log( userResponse.data );
-            let userId;
+            if ( passwordUpdate ) {
 
-            var URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users=" + userName + "/reset-password"
+              console.log( userResponse.data );
+              let userId = userResponse.data[ 0 ].id;
 
-            let config = {
-              method: "get",
-              url: URL,
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${adminToken}`,
+              //API URL used to update the password.
+              var URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
+
+              let data = {
+                "temporary": false,
+                "type": "password",
+                "value": password
               }
-            };
+
+              let config2 = {
+                method: "put",
+                url: URL2,
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${adminToken}`,
+                },
+                data: data
+              };
+
+              try {
+
+                //Sending request to Update Password.
+                await requestController.httpRequest( config2, false );
+
+              } catch ( er ) {
+
+                let error = await errorService.handleError( er );
+
+                reject( {
+
+                  error_message: "Error Occured While Updating Password of User in Check Updated Password Component.",
+                  error_detail: error
+                } );
+
+              }
+
+            }
+
           }
 
 
