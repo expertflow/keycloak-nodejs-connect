@@ -2129,6 +2129,7 @@ class KeycloakService extends Keycloak {
 
             try {
 
+              //Checking whether finesse password is updated or not. If updated, update it on keycloak as well without halting login process
               await this.checkPasswordUpdate( keycloakAdminToken.access_token, finesseLoginResponse.data.username, password );
 
               //Checking whether finesse user already exist in keycloak and fetch its token
