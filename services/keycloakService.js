@@ -2992,7 +2992,19 @@ class KeycloakService extends Keycloak {
 
           } finally {
 
-            console.log( 'here...' );
+            console.log( userResponse.data );
+            let userId;
+
+            var URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users=" + userName + "/reset-password"
+
+            let config = {
+              method: "get",
+              url: URL,
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${adminToken}`,
+              }
+            };
           }
 
 
