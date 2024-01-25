@@ -2980,7 +2980,6 @@ class KeycloakService extends Keycloak {
             let tokenResponse = await this.getAccessToken( userName, password );
 
             if ( tokenResponse.access_token ) {
-              console.log( 'here' );
 
               resolve( [] );
             }
@@ -2990,7 +2989,6 @@ class KeycloakService extends Keycloak {
             if ( er.error_detail.status == 401 ) {
 
               passwordUpdate = true;
-              console.log( 'Keycloak Password Update Process Started...' );
 
             } else {
 
@@ -3007,7 +3005,6 @@ class KeycloakService extends Keycloak {
 
             if ( passwordUpdate ) {
 
-              console.log( userResponse.data );
               let userId = userResponse.data[ 0 ].id;
 
               //API URL used to update the password.
