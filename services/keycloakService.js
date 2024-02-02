@@ -2213,7 +2213,7 @@ class KeycloakService extends Keycloak {
                 if ( userCreated.status == 201 ) {
 
                   //Returning the token of recently created User
-                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
+                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, keycloakConfig[ "realm" ] );
                 }
 
               } catch ( err ) {
@@ -2337,24 +2337,24 @@ class KeycloakService extends Keycloak {
 
                       let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
 
-                      if ( !( supervisors.includes( userObject.username ) ) ) {
+                      if ( !( supervisors.includes( ( userObject.username ).toLowerCase() ) ) ) {
 
-                        group.attributes.supervisor = [ ` ${group.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
+                        group.attributes.supervisor = [ `${group.attributes[ 'supervisor' ][ 0 ]},${( userObject.username ).toLowerCase()}` ];
                       }
 
                     } else {
 
-                      group.attributes.supervisor = [ `${userObject.username}` ];
+                      group.attributes.supervisor = [ `${( userObject.username ).toLowerCase()}` ];
                     }
                   }
 
                   if ( group.attributes.supervisor ) {
 
                     groupData[ 0 ] = group;
-                    await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+                    let supervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
                   }
 
-                  let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
+                  /* let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
 
                   if ( !userBasedPolicy.config.users.includes( userId ) ) {
 
@@ -2366,7 +2366,7 @@ class KeycloakService extends Keycloak {
                     userBasedPolicy.users = parsedArray;
                     let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
 
-                  }
+                  } */
 
                 } ) );
               }
@@ -2525,7 +2525,7 @@ class KeycloakService extends Keycloak {
         }
 
         //Comparing the basic info of Finesse User and Normal User.
-        if ( finObj.username != keyObj.username
+        if ( ( finObj.username ).toLowerCase() != keyObj.username
           || finObj.firstName != keyObj.firstName
           || finObj.lastName != keyObj.lastName
           || ( userAttributes.user_name && finObj.loginName !== userAttributes.user_name[ 0 ] )
@@ -2534,7 +2534,7 @@ class KeycloakService extends Keycloak {
         ) {
 
           data = {
-            username: finObj.username,
+            username: ( finObj.username ).toLowerCase(),
             firstName: finObj.firstName,
             lastName: finObj.lastName,
             attributes: {
@@ -2685,6 +2685,7 @@ class KeycloakService extends Keycloak {
                         reject( err );
                       }
 
+                      /*
                       let userToRemoveFromPolicy;
                       let userToAddInPolicy;
                       let results = [];
@@ -2702,13 +2703,13 @@ class KeycloakService extends Keycloak {
                         return ciscoTeams.some( ( team ) => team.name === result );
                       } );
 
-                      if ( finObj.supervisedGroups && results.length > 0 ) {
+                       if ( finObj.supervisedGroups && results.length > 0 ) {
 
                         userToRemoveFromPolicy = results.filter( group => !finObj.supervisedGroups.find( finGroup => finGroup.name == group ) );
                       } else {
 
                         userToRemoveFromPolicy = results;
-                      }
+                      } */
 
                       ciscoTeams.forEach( ( group ) => {
 
@@ -2717,7 +2718,7 @@ class KeycloakService extends Keycloak {
                         if (
                           attributes &&
                           attributes.supervisor &&
-                          attributes.supervisor[ 0 ].split( ',' ).includes( finObj.username ) &&
+                          attributes.supervisor[ 0 ].split( ',' ).includes( ( finObj.username ).toLowerCase() ) &&
                           !name.includes( '_permission' )
                         ) {
 
@@ -2758,7 +2759,7 @@ class KeycloakService extends Keycloak {
                                 let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
 
                                 //checking if current user is part of non-supervised group as supervisor
-                                if ( supervisors.includes( ( finObj.username ).toString() ) ) {
+                                if ( supervisors.includes( ( ( finObj.username ).toLowerCase() ).toString() ) ) {
 
                                   let remainingSupervisors = supervisors.filter( supervisor => supervisor != ( keyObj.username ) );
                                   group.attributes.supervisor = remainingSupervisors.length > 0 ? [ `${remainingSupervisors.join( ',' )}` ] : [ '' ];
@@ -2784,7 +2785,7 @@ class KeycloakService extends Keycloak {
                       }
 
                       //find Permission using Permission Name
-                      if ( userToRemoveFromPolicy.length > 0 ) {
+                      /* if ( userToRemoveFromPolicy.length > 0 ) {
 
                         const removalPromises = [];
 
@@ -2820,7 +2821,7 @@ class KeycloakService extends Keycloak {
                         // Wait for all promises to complete before moving on
                         await Promise.all( removalPromises );
 
-                      }
+                      } */
 
 
                       try {
@@ -2828,7 +2829,7 @@ class KeycloakService extends Keycloak {
                         //Adding user as supervisor to new Teams.
                         if ( finObj.supervisedGroups ) {
 
-                          userToAddInPolicy = finObj.supervisedGroups.filter( group => !results.includes( group.name ) );
+                          //userToAddInPolicy = finObj.supervisedGroups.filter( group => !results.includes( group.name ) );
                           userAttributeToAdd = finObj.supervisedGroups.filter( finGroup => !supervisedKeycloakTeams.find( group => finGroup.name == group.name ) );
 
                           if ( userAttributeToAdd.length > 0 ) {
@@ -2844,13 +2845,13 @@ class KeycloakService extends Keycloak {
 
                                   let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
 
-                                  if ( !( supervisors.includes( finObj.username ) ) ) {
+                                  if ( !( supervisors.includes( ( finObj.username ).toLowerCase() ) ) ) {
 
-                                    group.attributes.supervisor = ( supervisors[ 0 ] != '' ) ? [ ` ${group.attributes[ 'supervisor' ][ 0 ]},${finObj.username}` ] : [ `${finObj.username}` ];
+                                    group.attributes.supervisor = ( supervisors[ 0 ] != '' ) ? [ `${group.attributes[ 'supervisor' ][ 0 ]},${( finObj.username ).toLowerCase()}` ] : [ `${( finObj.username ).toLowerCase()}` ];
                                   }
                                 } else {
 
-                                  group.attributes.supervisor = [ `${finObj.username}` ];
+                                  group.attributes.supervisor = [ `${( finObj.username ).toLowerCase()}` ];
                                 }
                               }
 
@@ -2867,7 +2868,7 @@ class KeycloakService extends Keycloak {
 
                         }
 
-                        if ( userToAddInPolicy.length > 0 ) {
+                        /* if ( userToAddInPolicy.length > 0 ) {
 
                           const additionPromises = [];
 
@@ -2902,7 +2903,7 @@ class KeycloakService extends Keycloak {
                           // Wait for all promises to complete before moving on
                           await Promise.all( additionPromises );
 
-                        }
+                        } */
 
                       } catch ( err ) {
 
