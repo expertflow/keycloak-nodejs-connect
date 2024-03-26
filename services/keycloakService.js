@@ -2600,6 +2600,13 @@ class KeycloakService extends Keycloak {
             }
           } );
 
+          //find if senior_agents_permission group is assigned to user already against an agent role.
+          let isSeniorAgent = keycloakGroups.some( group => group.name == 'senior_agents_permission' );
+
+          if ( isSeniorAgent && keyObj.roles.includes( 'agent' ) && !finesseGroups.includes( 'senior_agents_permission' ) ) {
+            finesseGroups.push( 'senior_agents_permission' );
+          }
+
           groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
           groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group.name ) );
 
