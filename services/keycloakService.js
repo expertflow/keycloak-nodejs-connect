@@ -2323,52 +2323,57 @@ class KeycloakService extends Keycloak {
               let groups = await requestController.httpRequest( config, false );
               let clientId = await this.getClientId( token );
 
-              let supervisedGroups = groups.data.filter( group => userObject.supervisedGroups.find( finesseSup => finesseSup.name == group.name ) );
+              //Run this Supervised Groups Assignment flow only if finesse user is supervising some group.
+              if ( userObject.supervisedGroups && groups.length > 0 ) {
 
-              if ( supervisedGroups.length > 0 ) {
+                let supervisedGroups = groups.data.filter( group => userObject.supervisedGroups.find( finesseSup => finesseSup.name == group.name ) );
 
-                await Promise.all( supervisedGroups.map( async ( group ) => {
+                if ( supervisedGroups.length > 0 ) {
 
-                  let groupData = [];
+                  await Promise.all( supervisedGroups.map( async ( group ) => {
 
-                  if ( group.attributes != null ) {
+                    let groupData = [];
 
-                    if ( 'supervisor' in group.attributes ) {
+                    if ( group.attributes != null ) {
 
-                      let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
+                      if ( 'supervisor' in group.attributes ) {
 
-                      if ( !( supervisors.includes( ( userObject.username ).toLowerCase() ) ) ) {
+                        let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
 
-                        group.attributes.supervisor = [ `${group.attributes[ 'supervisor' ][ 0 ]},${( userObject.username ).toLowerCase()}` ];
+                        if ( !( supervisors.includes( ( userObject.username ).toLowerCase() ) ) ) {
+
+                          group.attributes.supervisor = [ `${group.attributes[ 'supervisor' ][ 0 ]},${( userObject.username ).toLowerCase()}` ];
+                        }
+
+                      } else {
+
+                        group.attributes.supervisor = [ `${( userObject.username ).toLowerCase()}` ];
                       }
-
-                    } else {
-
-                      group.attributes.supervisor = [ `${( userObject.username ).toLowerCase()}` ];
                     }
-                  }
 
-                  if ( group.attributes.supervisor ) {
+                    if ( group.attributes.supervisor ) {
 
-                    groupData[ 0 ] = group;
-                    let supervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
-                  }
+                      groupData[ 0 ] = group;
+                      let supervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
+                    }
 
-                  /* let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
+                    /* let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
+  
+                    if ( !userBasedPolicy.config.users.includes( userId ) ) {
+  
+                      //Parsing string quoted array into array.
+                      const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
+                      delete userBasedPolicy.config;
+                      parsedArray.push( userId );
+  
+                      userBasedPolicy.users = parsedArray;
+                      let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
+  
+                    } */
 
-                  if ( !userBasedPolicy.config.users.includes( userId ) ) {
+                  } ) );
+                }
 
-                    //Parsing string quoted array into array.
-                    const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
-                    delete userBasedPolicy.config;
-                    parsedArray.push( userId );
-
-                    userBasedPolicy.users = parsedArray;
-                    let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
-
-                  } */
-
-                } ) );
               }
 
             } catch ( er ) {
@@ -2678,7 +2683,7 @@ class KeycloakService extends Keycloak {
                     let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
 
 
-                    if ( teamsDashboardPermissions || finObj.supervisedGroups ) {
+                    if ( teamsDashboardPermissions || finObj.supervisedGroups || finObj.roles.includes( 'supervisor' ) ) {
 
                       let clientId;
 
