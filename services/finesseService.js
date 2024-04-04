@@ -109,6 +109,7 @@ class FinesseService {
         return new Promise( async ( resolve, reject ) => {
 
             var URL = finesseUrl + '/finesse/api/User/' + username;
+            let userObject = {};
 
             let config = {
                 method: 'get',
@@ -124,7 +125,44 @@ class FinesseService {
 
                 let tokenResponse = await requestController.httpRequest( config, true );
 
+                parseXMLString( tokenResponse.data, async ( err, result ) => {
+
+                    if ( err ) {
+                        console.error( err );
+                    } else {
+                        if ( result.User ) {
+
+                            let user = result.User;
+
+                            userObject = {
+                                username: user.loginId[ 0 ],
+                                loginName: user.loginName[ 0 ],
+                                firstName: user.firstName[ 0 ],
+                                lastName: user.lastName[ 0 ],
+                                extension: user.extension[ 0 ],
+                                roles: ( user.roles[ 0 ].role ).map( role => role.toLowerCase() ),
+                                group: ( user.teamName == '' || user.teamName == null ) ? [ 'default' ] : { id: user.teamId[ 0 ], name: user.teamName[ 0 ] }
+                            }
+
+                            if ( user.teams ) {
+
+                                if ( user.teams[ 0 ].Team ) {
+
+                                    userObject.supervisedGroups = ( user.teams[ 0 ].Team ).map( team => {
+                                        return {
+                                            id: team.id[ 0 ],
+                                            name: team.name[ 0 ]
+                                        }
+                                    } );
+                                }
+                            }
+                        }
+                    }
+                }
+                );
+
                 resolve( {
+                    'data': userObject,
                     'status': tokenResponse.status
                 } );
 
