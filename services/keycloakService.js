@@ -2,6 +2,9 @@ var session = require( "express-session" );
 var Keycloak = require( "keycloak-connect" );
 const Joi = require( "joi" );
 const parseXMLString = require( "xml2js" ).parseString;
+const qrcode = require("qrcode");
+const speakeasy = require('speakeasy')
+
 
 var requestController = require( "../controller/requestController.js" );
 var memory = new session.MemoryStore();
@@ -26,20 +29,67 @@ class KeycloakService extends Keycloak {
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken ) {
+  async authenticateUserViaKeycloak(user_name, user_password, realm_name, is2FAEnabled = false, twoFAChannel, finesseUrl, userRoles, finesseToken) {
 
     let token = "";
 
     // If finesseUrl is empty it means normal keycloak auth is required.
-    if ( finesseUrl == "" ) {
+    if (finesseUrl == "") {
+      token = await this.getKeycloakTokenWithIntrospect(user_name, user_password, realm_name);
 
-      token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name );
+      if (is2FAEnabled) {     // if 2FA is enabled then running the 2FA flow
+        if (twoFAChannel == '')
+          throw new Error('twoFAChannel parameter is empty')
+
+        // checking if user attributes in keycloak exist or not to confirm 2FA registration
+        if (!token.keycloak_User.attributes || !token.keycloak_User.attributes.is2FARegistered) {
+
+          // appending extra information regarding 2FA in response object
+          token.is2FARegistered = false
+          token.twoFAChannel = twoFAChannel
+          token.message = "2FA registration required"
+
+          // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
+          if (twoFAChannel == 'app') {
+            // QR Code and Secret Code generation based on username
+            const qrSetup = await this.getQRCode(user_name)
+            token.otpSecret = qrSetup.secret
+            token.qrImage = qrSetup.image
+
+            // getting admin access token to update the user attributes
+            const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
+            const adminToken = adminData.access_token
+
+            //updating user attributes for 2FA
+            let newAttributes = {}
+            if (token.keycloak_User.attributes) newAttributes = token.keycloak_User.attributes
+            newAttributes.tempOTPSecret = qrSetup.secret
+            newAttributes.otpChannel = 'app'
+            newAttributes.is2FARegistered = false
+
+
+            // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
+            let updationResponse = await this.updateUserAttributes(adminToken, token.keycloak_User.id, newAttributes)
+            if (!updationResponse) {
+              throw new Error('Error occured while updating user attributes')
+            }
+          }
+        }
+        else if (token.keycloak_User.attributes.is2FARegistered[0] == 'true') {     // if user has already registered for 2FA
+          token.is2FARegistered = true
+          token.twoFAChannel = twoFAChannel
+          token.message = "OTP required"
+        }
+      }
       return token;
 
     } else {
 
       // Finesse Auth, takes userRole in argument to create user along with role.
-      token = await this.authenticateFinesse( user_name, user_password, finesseUrl, userRoles, finesseToken );
+      token = await this.authenticateFinesse(user_name, user_password, finesseUrl, userRoles, finesseToken);
+
+      if (keycloakConfig.TWO_FA_ENABLED) {
+      }
       return token;
 
     }
@@ -167,6 +217,115 @@ class KeycloakService extends Keycloak {
 
       }
     } );
+  }
+
+  // function for getting user details (and extracting attributes)
+  async getUserDetails(adminToken, username) {
+    var URL = keycloakConfig["auth-server-url"] + "admin/realms/" + keycloakConfig["realm"] + "/users?username=" + username;
+    let config = {
+      method: "get",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Bearer ${adminToken}`
+      }
+    };
+
+    try {
+
+      let userDetails = await requestController.httpRequest(config, true);
+
+      if (userDetails.data[0]) {
+        return userDetails.data[0];    // extracting user details from response object
+      }
+      else throw false;
+
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // function for generating QR code and Secret code based on username
+  async getQRCode(username) {
+    const secret = speakeasy.generateSecret({ name: username, symbols: false })
+    const image = await qrcode.toDataURL(secret.otpauth_url + "&issuer=EFCX")
+    return { secret: secret.ascii, image }
+  }
+
+  // function for updating user attributes in KeyCloak for 2FA registration
+  async updateUserAttributes(adminToken, userId, attributesToUpdate) {
+    var URL = keycloakConfig["auth-server-url"] + "admin/realms/" + keycloakConfig["realm"] + "/users/" + userId;
+    let config = {
+      method: "put",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`
+      },
+      data: {
+        attributes: attributesToUpdate
+      }
+    };
+
+    try {
+      let updationResponse = await requestController.httpRequest(config, false);
+      if (updationResponse.status > 200) {
+        return true;
+      }
+      else throw false;
+
+    } catch (error) {
+      console.log(error)
+      return false;
+    }
+  }
+
+  // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
+  async validateOTP(username, otpToValidate) {
+    const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
+    const adminToken = adminData.access_token
+
+    // getting user details for fetching attributes and otpSecret or OTP validation
+    let userDetails = await this.getUserDetails(adminToken, username)
+    if (userDetails.attributes) {
+      let userAttributes = userDetails.attributes
+
+      if (!userAttributes.is2FARegistered)
+        throw new Error('User has not registered for 2FA')
+
+      // running OTP validation flow for authenticator app
+      if (userAttributes.otpChannel[0] == 'app') {
+        let secret = userAttributes.otpSecret ? userAttributes.otpSecret[0] : userAttributes.tempOTPSecret[0]
+
+        const verified = speakeasy.totp.verify({ secret: secret, encoding: 'ascii', token: otpToValidate });
+        if (!verified) throw new Error('Invalid OTP');
+
+        // updating user attributes if he is registering for 2FA using OTP
+        if (userAttributes.is2FARegistered[0] == 'false') {
+          let newAttributes = {}
+          for (let key in userAttributes) {
+            newAttributes[key] = userAttributes[key][0]
+          }
+          if (newAttributes.tempOTPSecret) {
+            newAttributes.otpSecret = newAttributes.tempOTPSecret
+            delete newAttributes.tempOTPSecret
+          }
+          newAttributes.is2FARegistered = true
+
+          let isUpdated = await this.updateUserAttributes(adminToken, userDetails.id, newAttributes)
+          if (!isUpdated)
+            throw new Error('Error occured while updating user attributes')
+        }
+
+      }
+
+    }
+    else throw new Error('Error occured while fetching user attributes for OTP validation')
+    return true
   }
 
   // this function requires an Admin user in keycloak.json having realm-management roles
