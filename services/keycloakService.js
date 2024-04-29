@@ -12,7 +12,6 @@ let realmRoles = [];
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
-const { response } = require( "express" );
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
@@ -2096,7 +2095,6 @@ class KeycloakService extends Keycloak {
 
               //Checking whether finesse password is updated or not. If updated, update it on keycloak as well without halting login process
               await this.checkPasswordUpdate( keycloakAdminToken.access_token, finesseLoginResponse.data.username, password );
-
               //Checking whether finesse user already exist in keycloak and fetch its token
               keycloakAuthToken = await this.getAccessToken( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
               authenticatedByKeycloak = true;
@@ -3042,6 +3040,7 @@ class KeycloakService extends Keycloak {
       }
     } );
   }
+
 
   async generateAccessTokenFromRefreshToken( refreshToken ) {
     return new Promise( async ( resolve, reject ) => {
