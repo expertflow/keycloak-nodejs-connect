@@ -38,12 +38,13 @@ class KeycloakService extends Keycloak {
       token = await this.getKeycloakTokenWithIntrospect(user_name, user_password, realm_name);
 
       if (is2FAEnabled) {     // if 2FA is enabled then running the 2FA flow
-        if (twoFAChannel == '')
-          throw new Error('twoFAChannel parameter is empty')
+        if (!twoFAChannel || twoFAChannel == '') {
+          return Promise.reject({ status: 400, error_message: 'twoFAChannel parameter is empty' })
+        }
 
         // checking if user attributes in keycloak exist or not to confirm 2FA registration
         if (!token.keycloak_User.attributes || !token.keycloak_User.attributes.is2FARegistered) {
-
+          
           // appending extra information regarding 2FA in response object
           token.is2FARegistered = false
           token.twoFAChannel = twoFAChannel
@@ -53,8 +54,11 @@ class KeycloakService extends Keycloak {
           if (twoFAChannel == 'app') {
             // QR Code and Secret Code generation based on username
             const qrSetup = await this.getQRCode(user_name)
-            token.otpSecret = qrSetup.secret
-            token.qrImage = qrSetup.image
+            if (qrSetup) {
+              token.otpSecret = qrSetup.secret
+              token.qrImage = qrSetup.image
+            }
+            else return Promise.reject({ error: 404, error_message: 'Error occured while generating QR code' })
 
             // getting admin access token to update the user attributes
             const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
@@ -68,10 +72,7 @@ class KeycloakService extends Keycloak {
             newAttributes.is2FARegistered = false
 
             // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
-            let updationResponse = await this.updateUserAttributes(adminToken, token.keycloak_User.id, newAttributes)
-            if (!updationResponse) {
-              throw new Error('Error occured while updating user attributes')
-            }
+            await this.updateUserAttributes(adminToken, token.keycloak_User.id, newAttributes)
           }
         }
         else if (token.keycloak_User.attributes.is2FARegistered[0] == 'true') {     // if user has already registered for 2FA
@@ -80,7 +81,7 @@ class KeycloakService extends Keycloak {
           token.message = "OTP required"
 
           // deleting otpSecret from response
-          if(token.keycloak_User.attributes.otpSecret)
+          if (token.keycloak_User.attributes.otpSecret)
             delete token.keycloak_User.attributes.otpSecret
         }
       }
@@ -244,14 +245,20 @@ class KeycloakService extends Keycloak {
       else throw false;
 
     } catch (error) {
-      return false;
+      let err = await errorService.handleError(error)
+      return Promise.reject({ error_message: 'Error occured while fetching user details', error_detail: err });
     }
   }
 
   // function for generating QR code and Secret code based on username
   async getQRCode(username) {
     const secret = speakeasy.generateSecret({ name: username, symbols: false })
-    const image = await qrcode.toDataURL(secret.otpauth_url + "&issuer=EFCX")
+    let image;
+    try {
+      image = await qrcode.toDataURL(secret.otpauth_url + "&issuer=EFCX")
+    } catch (error) {
+      return false;
+    }
     return { secret: secret.ascii, image }
   }
 
@@ -273,14 +280,10 @@ class KeycloakService extends Keycloak {
     };
 
     try {
-      let updationResponse = await requestController.httpRequest(config, false);
-      if (updationResponse.status > 200) {
-        return true;
-      }
-      else throw false;
-
+      await requestController.httpRequest(config, false);
     } catch (error) {
-      return false;
+      let err = await errorService.handleError(error)
+      return Promise.reject({ error_message: 'Error occured while updating user attribues', error_detail: err });
     }
   }
 
@@ -302,17 +305,19 @@ class KeycloakService extends Keycloak {
       }
       newAttributes.is2FARegistered = true
       newAttributes.otpChannel = 'sms'
-      newAttributes.phoneNumber = '+'+phoneNumber
+      newAttributes.phoneNumber = '+' + phoneNumber
 
       // saving phoneNumber & updating user attributes
-      let isUpdated = await this.updateUserAttributes(adminToken, userObject.keycloak_User.id, newAttributes)
-      
-      if (!isUpdated)
-        throw new Error('Error occured while updating user attributes')
+      try {
+        await this.updateUserAttributes(adminToken, userObject.keycloak_User.id, newAttributes)
+      } catch (error) {
+        let err = await errorService.handleError(error)
+        return Promise.reject({ error_message: 'Error occured while registering phone number', error_detail: err });
+      }
     }
-    else throw new Error('Error occured while fetching user attributes from userObject')
+    else return Promise.reject({ error: 400, error_message: 'Error occured while fetching user attributes' })
 
-    return {is2FARegistered: true, otpChannel: 'sms'}
+    return { is2FARegistered: true, otpChannel: 'sms' }
   }
 
   // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
@@ -326,14 +331,15 @@ class KeycloakService extends Keycloak {
       let userAttributes = userDetails.attributes
 
       if (!userAttributes.is2FARegistered)
-        throw new Error('User has not registered for 2FA')
+        return Promise.reject({ error: 404, error_message: 'User has not registered for 2FA' })
+
 
       // running OTP validation flow for authenticator app
       if (userAttributes.otpChannel[0] == 'app') {
         let secret = userAttributes.otpSecret ? userAttributes.otpSecret[0] : userAttributes.tempOTPSecret[0]
 
         const verified = speakeasy.totp.verify({ secret: secret, encoding: 'ascii', token: otpToValidate });
-        if (!verified) throw new Error('Invalid OTP');
+        if (!verified) return Promise.reject({ error: 401, error_message: 'Invalid OTP' });
 
         // updating user attributes if he is registering for 2FA using OTP
         if (userAttributes.is2FARegistered[0] == 'false') {
@@ -347,20 +353,18 @@ class KeycloakService extends Keycloak {
           }
           newAttributes.is2FARegistered = true
 
-          let isUpdated = await this.updateUserAttributes(adminToken, userDetails.id, newAttributes)
-          if (!isUpdated)
-            throw new Error('Error occured while updating user attributes')
+          this.updateUserAttributes(adminToken, userDetails.id, newAttributes)
         }
 
       }
 
     }
-    else throw new Error('Error occured while fetching user attributes for OTP validation')
-    
+    else return Promise.reject({ error: 400, error_message: 'Error occured while fetching user attributes' })
+
     // deleting otpSecret from response
-    if(userObject.keycloak_User.attributes.otpSecret)
+    if (userObject.keycloak_User.attributes.otpSecret)
       delete userObject.keycloak_User.attributes.otpSecret
-  
+
     return userObject
   }
 
