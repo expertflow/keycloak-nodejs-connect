@@ -323,6 +323,7 @@ class KeycloakService extends Keycloak {
 
                           responseObject.userTeam = teamData.userTeam;
                           responseObject.supervisedTeams = teamData.supervisedTeams;
+                          responseObject.secondarySupervisedTeams = teamData.secondarySupervisedTeams;
 
                           let finalObject = {
 
@@ -1121,11 +1122,12 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  //function to be used only in teams implementation
+
   async getUserSupervisedGroups( userId, username, roles, adminToken ) {
 
     return new Promise( async ( resolve, reject ) => {
 
+      let team = {};
       let error;
 
       var config = {
@@ -1142,132 +1144,95 @@ class KeycloakService extends Keycloak {
       try {
 
         //User Groups
-        let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
+        let URL = keycloakConfig[ "ef-server-url" ] + "team/" + userId;
         config.url = URL;
-        config.headers.Authorization = "Bearer " + adminToken;
 
         try {
 
-          let userGroup = await requestController.httpRequest( config, true );
-          let team = {};
+          let userTeams = await requestController.httpRequest( config, true );
 
-          if ( userGroup.data.length != 0 ) {
+          if ( userTeams.response.status == 404 ) {
 
-            let groups = userGroup.data;
-            let userTeam = {};
-            let supervisedTeams = [];
-            let supervisedGroupsName = [];
-
-            let filteredTeams = groups.filter( ( group ) => !group.name.includes( "_permission" ) );
-            let permissionGroups = groups.filter( ( group ) => group.name.includes( "_permission" ) );
-
-            if ( permissionGroups.length > 0 ) {
-
-              team.permissionGroups = [];
-
-              permissionGroups.forEach( perGroup => {
-
-                team.permissionGroups.push( perGroup.name );
-              } );
-            }
-
-            if ( filteredTeams.length > 0 ) {
-
-              userTeam = {
-                teamId: filteredTeams[ 0 ].id,
-                teamName: filteredTeams[ 0 ].name,
-              };
-
-              team.userTeam = userTeam;
-
-              /*
-              if ( permissions.length > 0 ) {
-
-                let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
-
-                if ( teamsDashboardPermissions ) {
-
-                  supervisedGroupsName = teamsDashboardPermissions.scopes.map( scope => {
-                    let groupName = scope.split( '-group' );
-                    return groupName[ 0 ];
-                  } );
-                }
-
+            reject( {
+              error_message: "Error Occured While Fetching User Team.",
+              error_detail: {
+                status: 403,
+                reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
               }
+            } );
 
-               try {
-
-                supervisedTeams = await this.gettingGroupByGroupName( supervisedGroupsName, adminToken );
-
-              } catch ( er ) {
-
-                error = await errorService.handleError( er );
-
-                reject( {
-                  error_message: "Error Occured While Fetching User Team.",
-                  error_detail: error
-                } );
-
-              } */
-
-              if ( roles.includes( 'supervisor' ) ) {
-
-                delete config.url;
-
-                let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
-                config.url = URL2;
-                config.headers.Authorization = "Bearer " + adminToken;
-
-                try {
-
-                  let allGroups = await requestController.httpRequest( config, true );
-
-                  for ( let group of allGroups.data ) {
-
-                    if ( group.attributes != null ) {
-
-                      if ( 'supervisor' in group.attributes ) {
-
-                        let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
-
-                        if ( supervisors.includes( username ) && !group.name.includes( "_permission" ) ) {
-
-                          supervisedTeams.push( {
-                            'teamId': group.id,
-                            'teamName': group.name
-                          } );
-                        }
-                      }
-                    }
-
-                  }
-
-                } catch ( er ) {
-
-                  error = await errorService.handleError( er );
-
-                  reject( {
-                    error_message: "Error Occured While Fetching User Supervised Teams.",
-                    error_detail: error
-                  } );
-
-                }
-              }
-
-              team.supervisedTeams = supervisedTeams;
-              resolve( team );
-            }
           }
 
-          reject( {
-            error_message: "Error Occured While Fetching User Team.",
-            error_detail: {
-              status: 403,
-              reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
+          const { userTeam, supervisedTeams } = userTeams.data;
+
+          // Filter teams where the user is the primary supervisor
+          const supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor === username )
+            .map( team => {
+              return { teamId: team.teamId, teamName: team.teamName };
+            } );
+
+          // Filter teams where the user is a secondary supervisor
+          const secondarySupervisedTeamsFiltered = supervisedTeams.filter( team => team.secondarySupervisors.some( sup => sup.username === username ) )
+            .map( team => {
+              return { teamId: team.teamId, teamName: team.teamName };
+            } );
+
+
+          //User Groups
+          let URL1 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
+          config.url = URL1;
+          config.headers.Authorization = "Bearer " + adminToken;
+
+          try {
+
+            let userGroup = await requestController.httpRequest( config, true );
+
+            if ( userGroup.data.length != 0 ) {
+
+              let groups = userGroup.data;
+              let permissionGroups = groups.filter( ( group ) => group.name.includes( "_permission" ) );
+
+              if ( permissionGroups.length > 0 ) {
+
+                team.permissionGroups = [];
+
+                permissionGroups.forEach( perGroup => {
+
+                  team.permissionGroups.push( perGroup.name );
+                } );
+              }
             }
-          } );
+
+          } catch ( er ) {
+
+            error = await errorService.handleError( er );
+
+            reject( {
+              error_message: "Error Occured While Fetching User Team.",
+              error_detail: error
+            } );
+
+          }
+
+          team.userTeam = userTeam;
+          team.supervisedTeams = supervisedTeamsFiltered;
+          team.secondarySupervisedTeams = secondarySupervisedTeamsFiltered;
+
+          resolve( team );
 
         } catch ( er ) {
+
+          if ( er.response.status == 500 ) {
+
+            reject( {
+              error_message: "Error Occured While Fetching User Team.",
+              error_detail: {
+                status: 403,
+                reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
+              }
+            } );
+
+          }
 
           error = await errorService.handleError( er );
 
