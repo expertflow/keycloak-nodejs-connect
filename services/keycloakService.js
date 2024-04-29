@@ -67,7 +67,6 @@ class KeycloakService extends Keycloak {
             newAttributes.otpChannel = 'app'
             newAttributes.is2FARegistered = false
 
-
             // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
             let updationResponse = await this.updateUserAttributes(adminToken, token.keycloak_User.id, newAttributes)
             if (!updationResponse) {
@@ -79,6 +78,10 @@ class KeycloakService extends Keycloak {
           token.is2FARegistered = true
           token.twoFAChannel = twoFAChannel
           token.message = "OTP required"
+
+          // deleting otpSecret from response
+          if(token.keycloak_User.attributes.otpSecret)
+            delete token.keycloak_User.attributes.otpSecret
         }
       }
       return token;
@@ -88,8 +91,6 @@ class KeycloakService extends Keycloak {
       // Finesse Auth, takes userRole in argument to create user along with role.
       token = await this.authenticateFinesse(user_name, user_password, finesseUrl, userRoles, finesseToken);
 
-      if (keycloakConfig.TWO_FA_ENABLED) {
-      }
       return token;
 
     }
@@ -124,7 +125,7 @@ class KeycloakService extends Keycloak {
         resolve( tokenResponse.data );
 
       } catch ( er ) {
-
+        
         let error = await errorService.handleError( er );
 
         reject( {
@@ -279,18 +280,48 @@ class KeycloakService extends Keycloak {
       else throw false;
 
     } catch (error) {
-      console.log(error)
       return false;
     }
   }
 
+  // function for binding/registering phone number with user in Keycloak attributes
+  async registerPhoneNumber(userObject, phoneNumber) {
+    const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
+    const adminToken = adminData.access_token
+
+    // getting user attributes from the object and saving phoneNumber & additional information in KC
+    if (userObject.keycloak_User.attributes) {
+      let newAttributes = {}
+
+      //checking if some attributes already exist
+      if (userObject.keycloak_User.attributes.length > 0) {
+        let userAttributes = userObject.keycloak_User.attributes
+        for (let key in userAttributes) {
+          newAttributes[key] = userAttributes[key][0]
+        }
+      }
+      newAttributes.is2FARegistered = true
+      newAttributes.otpChannel = 'sms'
+      newAttributes.phoneNumber = '+'+phoneNumber
+
+      // saving phoneNumber & updating user attributes
+      let isUpdated = await this.updateUserAttributes(adminToken, userObject.keycloak_User.id, newAttributes)
+      
+      if (!isUpdated)
+        throw new Error('Error occured while updating user attributes')
+    }
+    else throw new Error('Error occured while fetching user attributes from userObject')
+
+    return {is2FARegistered: true, otpChannel: 'sms'}
+  }
+
   // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
-  async validateOTP(username, otpToValidate) {
+  async validateOTP(userObject, otpToValidate) {
     const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
     const adminToken = adminData.access_token
 
     // getting user details for fetching attributes and otpSecret or OTP validation
-    let userDetails = await this.getUserDetails(adminToken, username)
+    let userDetails = await this.getUserDetails(adminToken, userObject.keycloak_User.username)
     if (userDetails.attributes) {
       let userAttributes = userDetails.attributes
 
@@ -325,7 +356,12 @@ class KeycloakService extends Keycloak {
 
     }
     else throw new Error('Error occured while fetching user attributes for OTP validation')
-    return true
+    
+    // deleting otpSecret from response
+    if(userObject.keycloak_User.attributes.otpSecret)
+      delete userObject.keycloak_User.attributes.otpSecret
+  
+    return userObject
   }
 
   // this function requires an Admin user in keycloak.json having realm-management roles
