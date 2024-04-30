@@ -1150,7 +1150,9 @@ class KeycloakService extends Keycloak {
 
           let userTeams = await requestController.httpRequest( config, true );
 
-          if ( userTeams.response.status == 404 ) {
+          const { userTeam, supervisedTeams } = userTeams.data;
+
+          if ( Object.keys( userTeam ).length == 0 ) {
 
             reject( {
               error_message: "Error Occured While Fetching User Team.",
@@ -1162,19 +1164,23 @@ class KeycloakService extends Keycloak {
 
           }
 
-          const { userTeam, supervisedTeams } = userTeams.data;
+          let supervisedTeamsFiltered = [];
+          let secondarySupervisedTeamsFiltered = [];
 
-          // Filter teams where the user is the primary supervisor
-          const supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor === username )
-            .map( team => {
-              return { teamId: team.teamId, teamName: team.teamName };
-            } );
+          if ( supervisedTeams.length > 0 ) {
 
-          // Filter teams where the user is a secondary supervisor
-          const secondarySupervisedTeamsFiltered = supervisedTeams.filter( team => team.secondarySupervisors.some( sup => sup.username === username ) )
-            .map( team => {
-              return { teamId: team.teamId, teamName: team.teamName };
-            } );
+            // Filter teams where the user is the primary supervisor
+            supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor === username )
+              .map( team => {
+                return { teamId: team.teamId, teamName: team.teamName };
+              } );
+
+            // Filter teams where the user is a secondary supervisor
+            secondarySupervisedTeamsFiltered = supervisedTeams.filter( team => team.secondarySupervisors.some( sup => sup.username === username ) )
+              .map( team => {
+                return { teamId: team.teamId, teamName: team.teamName };
+              } );
+          }
 
 
           //User Groups
@@ -1220,18 +1226,6 @@ class KeycloakService extends Keycloak {
           resolve( team );
 
         } catch ( er ) {
-
-          if ( er.response.status == 500 ) {
-
-            reject( {
-              error_message: "Error Occured While Fetching User Team.",
-              error_detail: {
-                status: 403,
-                reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
-              }
-            } );
-
-          }
 
           error = await errorService.handleError( er );
 
