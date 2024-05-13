@@ -107,12 +107,20 @@ class ErrorService {
 
                     } else {
 
-                        if ( typeof ( err.response.data ) === "object" ) {
+                        if ( typeof ( err.response.data ) === "object" && !err.response.data.message ) {
 
                             return {
                                 status: err.response.status,
                                 reason: err.response.data.error
                             }
+                        }
+
+                        if ( typeof ( err.response.data ) === "object" && err.response.data.message ) {
+
+                            return {
+                                status: err.response.status,
+                                reason: err.response.data.message,
+                            };
                         }
 
                         return {
