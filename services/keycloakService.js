@@ -32,7 +32,7 @@ class KeycloakService extends Keycloak {
     // If finesseUrl is empty it means normal keycloak auth is required.
     if ( finesseUrl == "" ) {
 
-      token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name );
+      token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, 'CX' );
       return token;
 
     } else {
@@ -169,7 +169,7 @@ class KeycloakService extends Keycloak {
   }
 
   // this function requires an Admin user in keycloak.json having realm-management roles
-  async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name ) {
+  async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -290,7 +290,7 @@ class KeycloakService extends Keycloak {
                         //Fetching Groups data for each user.
                         try {
 
-                          let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, responseObject.roles, token );
+                          let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, token, type );
 
                           //Getting role against permission group
                           let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
@@ -1122,7 +1122,7 @@ class KeycloakService extends Keycloak {
   }
 
 
-  async getUserSupervisedGroups( userId, username, roles, adminToken ) {
+  async getUserSupervisedGroups( userId, username, adminToken, type ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -1152,7 +1152,7 @@ class KeycloakService extends Keycloak {
 
           const { userTeam, supervisedTeams } = userTeams.data;
 
-          if ( Object.keys( userTeam ).length == 0 ) {
+          if ( Object.keys( userTeam ).length == 0 && type != 'CX' ) {
 
             reject( {
               error_message: "Error Occured While Fetching User Team.",
@@ -2099,7 +2099,7 @@ class KeycloakService extends Keycloak {
                   .then( async ( updatedUser ) => {
 
                     //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
-                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ], 'CISCO' );
                   } )
                   .catch( ( err ) => {
 
@@ -2170,7 +2170,7 @@ class KeycloakService extends Keycloak {
                 if ( userCreated.status == 201 ) {
 
                   //Returning the token of recently created User
-                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, keycloakConfig[ "realm" ] );
+                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, keycloakConfig[ "realm" ], 'CISCO' );
                 }
 
               } catch ( err ) {
