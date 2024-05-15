@@ -287,42 +287,59 @@ class KeycloakService extends Keycloak {
                         delete config.headers.Authorization;
                         delete config.data;
 
+                        //Role to Remove from keycloak user during Update process.
+                        let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
+                        let administrativeRoles = responseObject.roles.filter( role => (
+                          !ignoreRoles.includes( role ) &&
+                          role.indexOf( "default-roles" ) == -1 ) );
+
+
+
                         //Fetching Groups data for each user.
                         try {
 
-                          let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, token, type );
+                          if ( ( !administrativeRoles.includes( 'agent' ) || !administrativeRoles.includes( 'supervisor' ) ) ) {
 
-                          //Getting role against permission group
-                          let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+                            responseObject.userTeam = {};
+                            responseObject.supervisedTeams = [];
 
-                          let hasRole;
+                          } else {
 
-                          if ( isRole ) {
-                            hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
+                            let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
+
+                            //Getting role against permission group
+                            let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
+                              teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+
+                            let hasRole;
+
+                            if ( isRole ) {
+                              hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
+                            }
+
+
+                            //checking if required roles are assigned to user or not.
+                            if ( isRole && !hasRole ) {
+
+                              reject( {
+                                error_message: "Error Occured While Generating User Access Token",
+                                error_detail: {
+                                  status: 403,
+                                  reason: ( isRole.length > 1 ) ?
+                                    `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
+                                    `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
+                                }
+                              } );
+                            }
+
+
+                            delete teamData.permissionGroups;
+
+                            responseObject.userTeam = teamData.userTeam;
+                            responseObject.supervisedTeams = teamData.supervisedTeams;
                           }
 
 
-                          //checking if required roles are assigned to user or not.
-                          if ( isRole && !hasRole ) {
-
-                            reject( {
-                              error_message: "Error Occured While Generating User Access Token",
-                              error_detail: {
-                                status: 403,
-                                reason: ( isRole.length > 1 ) ?
-                                  `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
-                                  `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
-                              }
-                            } );
-                          }
-
-
-                          delete teamData.permissionGroups;
-
-                          responseObject.userTeam = teamData.userTeam;
-                          responseObject.supervisedTeams = teamData.supervisedTeams;
-                          responseObject.secondarySupervisedTeams = teamData.secondarySupervisedTeams;
 
                           let finalObject = {
 
@@ -1121,39 +1138,34 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-
-  async getUserSupervisedGroups( userId, username, adminToken, type ) {
+  async getUserSupervisedGroups( userId, adminToken, type ) {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let team = {};
+      let team = { userTeam: {}, supervisedTeams: [] };
       let error;
 
       var config = {
-
         method: "get",
         headers: {
           Accept: "application/json",
           "cache-control": "no-cache",
           "Content-Type": "application/x-www-form-urlencoded",
-        }
-
+        },
       };
 
       try {
 
-        //User Groups
+        // User Groups
         let URL = keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
         config.url = URL;
 
         try {
 
           let userTeams = await requestController.httpRequest( config, true );
-
           const { userTeam, supervisedTeams } = userTeams.data;
 
           if ( Object.keys( userTeam ).length == 0 && type != 'CX' ) {
-
             reject( {
               error_message: "Error Occured While Fetching User Team.",
               error_detail: {
@@ -1161,80 +1173,52 @@ class KeycloakService extends Keycloak {
                 reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
               }
             } );
-
-          }
-
-          let supervisedTeamsFiltered = [];
-          let secondarySupervisedTeamsFiltered = [];
-
-          if ( supervisedTeams.length > 0 ) {
-
-            // Filter teams where the user is the primary supervisor
-            supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor.toLocaleLowerCase() === username.toLocaleLowerCase() )
-              .map( team => {
-                return { teamId: team.teamId, teamName: team.teamName };
-              } );
-
-            // Filter teams where the user is a secondary supervisor
-            secondarySupervisedTeamsFiltered = supervisedTeams.filter( team => team.secondarySupervisors.some( sup => sup.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) )
-              .map( team => {
-                return { teamId: team.teamId, teamName: team.teamName };
-              } );
-          }
-
-
-          //User Groups
-          let URL1 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
-          config.url = URL1;
-          config.headers.Authorization = "Bearer " + adminToken;
-
-          try {
-
-            let userGroup = await requestController.httpRequest( config, true );
-
-            if ( userGroup.data.length != 0 ) {
-
-              let groups = userGroup.data;
-              let permissionGroups = groups.filter( ( group ) => group.name.includes( "_permission" ) );
-
-              if ( permissionGroups.length > 0 ) {
-
-                team.permissionGroups = [];
-
-                permissionGroups.forEach( perGroup => {
-
-                  team.permissionGroups.push( perGroup.name );
-                } );
-              }
-            }
-
-          } catch ( er ) {
-
-            error = await errorService.handleError( er );
-
-            reject( {
-              error_message: "Error Occured While Fetching User Team.",
-              error_detail: error
-            } );
-
           }
 
           team.userTeam = userTeam;
-          team.supervisedTeams = supervisedTeamsFiltered;
-          team.secondarySupervisedTeams = secondarySupervisedTeamsFiltered;
-
-          resolve( team );
+          team.supervisedTeams = supervisedTeams;
 
         } catch ( er ) {
 
           error = await errorService.handleError( er );
 
-          reject( {
-            error_message: "Error Occured While Fetching User Team.",
-            error_detail: error
-          } );
+          // Log the error and proceed with default values
+          console.error( "Error while fetching user team:", error );
 
         }
+
+        // User Groups from Keycloak
+        let URL1 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
+        config.url = URL1;
+        config.headers.Authorization = "Bearer " + adminToken;
+
+        try {
+
+          let userGroup = await requestController.httpRequest( config, true );
+
+          if ( userGroup.data.length != 0 ) {
+
+            let groups = userGroup.data;
+            let permissionGroups = groups.filter( group => group.name.includes( "_permission" ) );
+
+            if ( permissionGroups.length > 0 ) {
+
+              team.permissionGroups = [];
+
+              permissionGroups.forEach( perGroup => {
+                team.permissionGroups.push( perGroup.name );
+              } );
+            }
+
+          }
+        } catch ( er ) {
+
+          error = await errorService.handleError( er );
+          // Log the error and proceed with default values
+          console.error( "Error while fetching user group:", error );
+        }
+
+        resolve( team );
 
       } catch ( er ) {
 
@@ -1244,9 +1228,7 @@ class KeycloakService extends Keycloak {
           error_message: "Error Occured While Generating Admin Access Token To Fetch User Team and User Supervised Teams.",
           error_detail: error
         } );
-
       }
-
     } );
   }
 
