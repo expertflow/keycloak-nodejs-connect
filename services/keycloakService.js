@@ -298,7 +298,7 @@ class KeycloakService extends Keycloak {
                         //Fetching Groups data for each user.
                         try {
 
-                          if ( ( !administrativeRoles.includes( 'agent' ) || !administrativeRoles.includes( 'supervisor' ) ) ) {
+                          if ( ( !administrativeRoles.includes( 'agent' ) && !administrativeRoles.includes( 'supervisor' ) ) ) {
 
                             responseObject.userTeam = {};
                             responseObject.supervisedTeams = [];
