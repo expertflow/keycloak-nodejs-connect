@@ -6,6 +6,11 @@ const parseXMLString = require( "xml2js" ).parseString;
 var requestController = require( "../controller/requestController.js" );
 var memory = new session.MemoryStore();
 
+const forge = require( 'node-forge' );
+const fs = require( 'fs' );
+const os = require( 'os' );
+const path = require( 'path' );
+
 var keycloakConfig = null;
 let realmRoles = [];
 
@@ -25,7 +30,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken ) {
+  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken, idpType = 'keycloak', externalIdpParams = {} ) {
 
     let token = "";
 
@@ -3291,6 +3296,119 @@ class KeycloakService extends Keycloak {
       }
     } );
   }
+
+  async encryptUserObject( adminToken, userObject ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+
+      // Define the path to the keys
+      const homeDir = os.homedir();
+      const publicKeyPath = path.join( homeDir, 'Expertflow/Keys/public.pem' );
+
+      // Load private key
+      const publicKeyPem = fs.readFileSync( publicKeyPath, 'utf8' );
+      let publicKey = forge.pki.publicKeyFromPem( publicKeyPem );
+
+      try {
+
+        let userJson = {
+          adminToken: adminToken,
+          userObject: userObject
+        }
+
+        let userData = JSON.stringify( userJson );
+
+        // Generate a random key for AES
+        const aesKey = forge.random.getBytesSync( 32 );
+        const iv = forge.random.getBytesSync( 16 );
+
+        // Encrypt the user object with AES
+        const cipher = forge.cipher.createCipher( 'AES-CBC', aesKey );
+        cipher.start( { iv: iv } );
+        cipher.update( forge.util.createBuffer( userData ) );
+        cipher.finish();
+        const encryptedData = cipher.output.getBytes();
+
+        // Encrypt the AES key with RSA
+        const encryptedKey = publicKey.encrypt( aesKey, 'RSA-OAEP', {
+          md: forge.md.sha256.create()
+        } );
+
+        resolve( {
+          iv: forge.util.encode64( iv ),
+          key: forge.util.encode64( encryptedKey ),
+          data: forge.util.encode64( encryptedData )
+        } );
+
+      } catch ( er ) {
+
+        console.log( er );
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Error Occured While Accessing Admin Token in Encrypt User Object.",
+          error_detail: error
+        } );
+
+      }
+
+    } );
+
+  }
+
+  async decryptUserObject( encryptedObject ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      try {
+
+        // Define the path to the keys
+        const homeDir = os.homedir();
+        const privateKeyPath = path.join( homeDir, 'Expertflow/Keys/private.pem' );
+
+        // Load private key
+        const privateKeyPem = fs.readFileSync( privateKeyPath, 'utf8' );
+        let privateKey = forge.pki.privateKeyFromPem( privateKeyPem );
+
+        const iv = forge.util.decode64( encryptedObject.iv );
+        const encryptedKey = forge.util.decode64( encryptedObject.key );
+        const encryptedData = forge.util.decode64( encryptedObject.data );
+
+        // Decrypt the AES key with RSA
+        const aesKey = privateKey.decrypt( encryptedKey, 'RSA-OAEP', {
+          md: forge.md.sha256.create()
+        } );
+
+        // Decrypt the data with AES
+        const decipher = forge.cipher.createDecipher( 'AES-CBC', aesKey );
+        decipher.start( { iv: iv } );
+        decipher.update( forge.util.createBuffer( encryptedData ) );
+        const result = decipher.finish();
+        const decryptedData = decipher.output.toString();
+
+        console.log( decryptedData );
+
+        //const userObject = JSON.parse( decryptedData );
+        resolve( decryptedData );
+
+      } catch ( er ) {
+
+        console.log( er );
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Error Occured While Decrypting User Object.",
+          error_detail: error
+        } );
+      }
+
+    } );
+  }
+
+
 
 }
 
