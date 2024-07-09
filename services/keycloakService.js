@@ -2790,7 +2790,7 @@ class KeycloakService extends Keycloak {
                 if ( supervisedTeams.length > 0 ) {
 
                   // Filter teams where the user is the primary supervisor
-                  supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor.toLocaleLowerCase() === username.toLocaleLowerCase() )
+                  supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() )
                     .map( team => {
                       return { teamId: team.teamId, teamName: team.teamName };
                     } );
