@@ -363,6 +363,23 @@ class KeycloakService extends Keycloak {
 
   // function for generating OTP from Twilio and sending via SMS - (callable from frontend)
   async sendOTPviaSMS(phoneNumber) {
+    if (phoneNumber.startsWith('+')) {
+      phoneNumber = phoneNumber.slice(1); // remove '+'
+      
+      if (!this.isValidPhoneNumber(phoneNumber)) {
+        return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+    else {
+      if (!this.isValidPhoneNumber(phoneNumber)) {
+        return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+    
     try {
       await twilioClient.verify.v2.services(keycloakConfig.TWILIO_VERIFY_SID)
         .verifications
@@ -373,6 +390,8 @@ class KeycloakService extends Keycloak {
         error_message: 'Error occured while sending OTP via SMS. This may be because of some issue with Twilio Service.'
       })
     }
+
+    return Promise.resolve('OTP sent successfully.')
   }
 
   // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
