@@ -2407,7 +2407,6 @@ class KeycloakService extends Keycloak {
 
             //Assigning Agent to CX team
             let assignAgentToTeam = await requestController.httpRequest( config2, false );
-            console.log( assignAgentToTeam.data );
 
           } catch ( er ) {
 
@@ -2434,7 +2433,6 @@ class KeycloakService extends Keycloak {
 
 
         if ( userObject.roles.includes( "supervisor" ) && userObject.supervisedGroups.length > 0 ) {
-
 
           for ( let supervisedGroup of userObject.supervisedGroups ) {
 
@@ -2485,33 +2483,71 @@ class KeycloakService extends Keycloak {
 
               } else {
 
-                //Check whether team of Supervisor already exists in CX Core or not
-                let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+                console.log( getSupervisorCXTeam.data[ 0 ].supervisor_Id );
 
-                let data = {
-                  "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
-                  "supervisor_Id": userId
-                }
+                //Adding this supervisor as Secondary Supervisor
+                if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
-                config2.method = 'put';
-                config2.url = URL7;
-                config2.data = data;
+                  //Assign Secondary Supervisor to a team
+                  let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+
+                  data = {
+                    "type": "secondary-supervisor",
+                    "usernames": [ userObject.username.toLocaleLowerCase() ]
+                  }
+
+                  config2.method = 'post';
+                  config2.url = URL7;
+                  config2.data = data;
+
+                  console.log( config2 );
+
+                  try {
+
+                    //Assigning Secondary Supervisor to CX team
+                    let assignSecondarySupervisorToTeam = await requestController.httpRequest( config2, false );
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+
+                      error_message: "Error Occured While Assigning Secondary Supervisor to CX Core Team.",
+                      error_detail: error
+                    } );
+                  }
+
+                } else {
+
+                  //Check whether team of Supervisor already exists in CX Core or not
+                  let URL8 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+
+                  let data = {
+                    "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                    "supervisor_Id": userId
+                  }
+
+                  config2.method = 'put';
+                  config2.url = URL8;
+                  config2.data = data;
 
 
-                try {
+                  try {
 
-                  //Updating CX team of Supervisor
-                  let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+                    //Updating CX team of Supervisor
+                    let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
 
-                } catch ( er ) {
+                  } catch ( er ) {
 
-                  let error = await errorService.handleError( er );
+                    let error = await errorService.handleError( er );
 
-                  reject( {
+                    reject( {
 
-                    error_message: "Error Occured While Updating CX Core Team.",
-                    error_detail: error
-                  } );
+                      error_message: "Error Occured While Updating CX Core Team.",
+                      error_detail: error
+                    } );
+                  }
                 }
 
               }
@@ -2724,14 +2760,6 @@ class KeycloakService extends Keycloak {
                 rolesPromises.push( removeRolesPromise );
               }
 
-              /* if ( rolesToAdd.includes( "supervisor" ) ) {
-
-                keycloakAuthToken = await this.getAccessToken( keyObj.username, password, keycloakConfig[ "realm" ] );
-                rptToken = await this.getTokenRPT( keyObj.username, password, keycloakAuthToken.access_token );
-                introspectToken = await this.getIntrospectToken( rptToken.access_token );
-                keyObj.permittedResources.Resources = introspectToken.authorization.permissions;
-              } */
-
               // Wait for all promises to complete before moving on
               await Promise.all( rolesPromises );
             }
@@ -2789,11 +2817,22 @@ class KeycloakService extends Keycloak {
 
                 if ( supervisedTeams.length > 0 ) {
 
-                  // Filter teams where the user is the primary supervisor
-                  supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() )
-                    .map( team => {
-                      return { teamId: team.teamId, teamName: team.teamName };
-                    } );
+                  //Fetching list of all primary and seconday supervised teams of current user (Whether in CX or Cisco)
+                  supervisedTeamsFiltered = supervisedTeams.filter( team => {
+                    const isPrimarySupervisor = team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase();
+                    const isSecondarySupervisor = team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() );
+
+                    return isPrimarySupervisor || isSecondarySupervisor;
+                  } ).map( team => {
+                    let type;
+                    if ( team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) {
+                      type = 'supervisor';
+                    } else if ( team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) ) {
+                      type = 'secondary supervisor';
+                    }
+
+                    return { teamId: team.teamId, teamName: team.teamName, type, source: team.source };
+                  } );
                 }
 
                 //If Agent team in finesse is different from Agent Team in finesse
@@ -2908,36 +2947,68 @@ class KeycloakService extends Keycloak {
                   }
                 }
 
+                //If no team is assigned to supervise to current user in Cisco, remove its all supervised teams from CX
                 if ( !finObj.supervisedGroups && supervisedTeamsFiltered.length > 0 ) {
 
                   for ( let supervisedTeam of supervisedTeamsFiltered ) {
 
-                    //Removing user from Supervising team in CX Core or not
-                    let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                    if ( supervisedTeam.source === 'CISCO' ) {
 
-                    let data = {
-                      "team_name": supervisedTeam.teamName,
-                      "supervisor_Id": null
-                    }
+                      if ( supervisedTeam.type === 'secondary supervisor' ) {
 
-                    config2.method = 'put';
-                    config2.url = URL7;
-                    config2.data = data;
+                        //Removing user from Secondary Supervisor in CX Core
+                        let URL13 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
 
-                    try {
+                        config2.method = 'delete';
+                        config2.url = URL13;
 
-                      //Updating CX team of Supervisor
-                      let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+                        try {
 
-                    } catch ( er ) {
+                          //Updating CX team of Supervisor
+                          let removeSecondarySupervisor = await requestController.httpRequest( config2, false );
 
-                      let error = await errorService.handleError( er );
+                        } catch ( er ) {
 
-                      reject( {
+                          let error = await errorService.handleError( er );
 
-                        error_message: "Error Occured While Updating CX Core Team.",
-                        error_detail: error
-                      } );
+                          reject( {
+
+                            error_message: "Error Occured While Updating CX Core Team To Remove Secondary Supervisor.",
+                            error_detail: error
+                          } );
+                        }
+
+
+                      } else {
+
+                        //Removing user from Supervising team in CX Core or not
+                        let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+
+                        let data = {
+                          "team_name": supervisedTeam.teamName,
+                          "supervisor_Id": null
+                        }
+
+                        config2.method = 'put';
+                        config2.url = URL7;
+                        config2.data = data;
+
+                        try {
+
+                          //Updating CX team of Supervisor
+                          let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                        } catch ( er ) {
+
+                          let error = await errorService.handleError( er );
+
+                          reject( {
+
+                            error_message: "Error Occured While Updating CX Core Team.",
+                            error_detail: error
+                          } );
+                        }
+                      }
                     }
 
                   }
@@ -3007,35 +3078,68 @@ class KeycloakService extends Keycloak {
 
                         } else {
 
-                          //Check whether team of Supervisor already exists in CX Core or not
-                          let URL10 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+                          //If the supervisor is already assigned to team, add current user as secondary supervisor.
+                          if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
-                          let data = {
-                            "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
-                            "supervisor_Id": userId
+                            //Assign Agent to a team
+                            let URL10 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+
+                            data = {
+                              "type": "secondary-supervisor",
+                              "usernames": [ finObj.username.toLowerCase() ]
+                            }
+
+                            config2.method = 'post';
+                            config2.url = URL10;
+                            config2.data = data;
+
+                            try {
+
+                              //Assigning Secondary Supervisor to CX team
+                              let assignSecondarySupervisorToTeam = await requestController.httpRequest( config2, false );
+
+                            } catch ( er ) {
+
+                              let error = await errorService.handleError( er );
+
+                              reject( {
+
+                                error_message: "Error Occured While Assigning Secondary Supervisor to CX Core Team.",
+                                error_detail: error
+                              } );
+                            }
+
+                          } else {
+
+                            //Adding current user as Supervisor to team
+                            let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+
+                            let data = {
+                              "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                              "supervisor_Id": userId
+                            }
+
+                            config2.method = 'put';
+                            config2.url = URL11;
+                            config2.data = data;
+
+
+                            try {
+
+                              //Updating CX team of Supervisor
+                              let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                            } catch ( er ) {
+
+                              let error = await errorService.handleError( er );
+
+                              reject( {
+
+                                error_message: "Error Occured While Updating CX Core Team To Add Supervisor in Finesse User Login (Update).",
+                                error_detail: error
+                              } );
+                            }
                           }
-
-                          config2.method = 'put';
-                          config2.url = URL10;
-                          config2.data = data;
-
-
-                          try {
-
-                            //Updating CX team of Supervisor
-                            let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
-
-                          } catch ( er ) {
-
-                            let error = await errorService.handleError( er );
-
-                            reject( {
-
-                              error_message: "Error Occured While Updating CX Core Team To Add Supervisor in Finesse User Login (Update).",
-                              error_detail: error
-                            } );
-                          }
-
 
                         }
 
@@ -3064,32 +3168,65 @@ class KeycloakService extends Keycloak {
 
                     for ( let supervisedTeam of teamsToRemoveFromCX ) {
 
-                      //Removing user from Supervising team in CX Core or not
-                      let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                      //Only removing user from supervising teams that are from Cisco
+                      if ( supervisedTeam.source === 'CISCO' ) {
 
-                      let data = {
-                        "team_name": supervisedTeam.teamName,
-                        "supervisor_Id": null
-                      }
+                        if ( supervisedTeam.type === 'secondary supervisor' ) {
 
-                      config2.method = 'put';
-                      config2.url = URL11;
-                      config2.data = data;
+                          //Removing user from Secondary Supervisor in CX Core
+                          let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
 
-                      try {
+                          config2.method = 'delete';
+                          config2.url = URL11;
 
-                        //Updating CX team of Supervisor
-                        let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+                          try {
 
-                      } catch ( er ) {
+                            //Updating CX team of Supervisor
+                            let removeSecondarySupervisor = await requestController.httpRequest( config2, false );
 
-                        let error = await errorService.handleError( er );
+                          } catch ( er ) {
 
-                        reject( {
+                            let error = await errorService.handleError( er );
 
-                          error_message: "Error Occured While Updating CX Core Team To Remove Supervisor.",
-                          error_detail: error
-                        } );
+                            reject( {
+
+                              error_message: "Error Occured While Updating CX Core Team To Remove Secondary Supervisor.",
+                              error_detail: error
+                            } );
+                          }
+
+
+                        } else {
+
+                          //Removing user from Supervising team in CX Core
+                          let URL12 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+
+                          let data = {
+                            "team_name": supervisedTeam.teamName,
+                            "supervisor_Id": null
+                          }
+
+                          config2.method = 'put';
+                          config2.url = URL12;
+                          config2.data = data;
+
+                          try {
+
+                            //Updating CX team of Supervisor
+                            let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                          } catch ( er ) {
+
+                            let error = await errorService.handleError( er );
+
+                            reject( {
+
+                              error_message: "Error Occured While Updating CX Core Team To Remove Supervisor.",
+                              error_detail: error
+                            } );
+                          }
+                        }
+
                       }
 
                     }
