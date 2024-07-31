@@ -48,21 +48,26 @@ class KeycloakService extends Keycloak {
           return Promise.reject({ status: 400, error_message: 'twoFAChannel parameter is empty or invalid' })
         }
 
+        // token for only sending info related to 2FA
+        let tempToken = {
+          username: user_name
+        };
+
         // checking if user attributes in keycloak exist or not to confirm 2FA registration
         if (!attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false') {
 
           // appending extra information regarding 2FA in response object
-          token.is2FARegistered = false
-          token.twoFAChannel = twoFAChannel
-          token.message = "2FA registration required"
+          tempToken.is2FARegistered = false
+          tempToken.twoFAChannel = twoFAChannel
+          tempToken.message = "2FA registration required"
 
           // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
           if (twoFAChannel == 'app') {
             // QR Code and Secret Code generation based on username
             const qrSetup = await this.getQRCode(user_name)
             if (qrSetup) {
-              token.otpSecret = qrSetup.secret
-              token.qrImage = qrSetup.image
+              tempToken.otpSecret = qrSetup.secret
+              tempToken.qrImage = qrSetup.image
             }
             else return Promise.reject({ error: 404, error_message: 'Error occurred while generating QR code.' })
 
@@ -82,11 +87,11 @@ class KeycloakService extends Keycloak {
           }
         }
         else if (attributesFromToken.is2FARegistered[0] == 'true') {     // if user has already registered for 2FA
-          token.is2FARegistered = true
-          token.twoFAChannel = twoFAChannel
-          token.message = "OTP required"
+          tempToken.is2FARegistered = true
+          tempToken.twoFAChannel = attributesFromToken.twoFAChannel[0]
+          tempToken.message = "OTP required"
 
-          if (twoFAChannel == 'sms' || attributesFromToken.twoFAChannel[0] == 'sms') {
+          if (attributesFromToken.twoFAChannel[0] == 'sms') {
             if (!attributesFromToken.phoneNumber) {
               return Promise.reject({
                 error: 404,
@@ -100,13 +105,17 @@ class KeycloakService extends Keycloak {
           if (token.keycloak_User.attributes.otpSecret)
             delete token.keycloak_User.attributes.otpSecret
         }
-        else{
+        else {
           return Promise.reject({
             error: 404,
             error_message: 'Error occurred while verifying user registration for 2FA.'
           })
         }
+
+        return tempToken;
+
       }
+
       return token;
 
     } else {
@@ -315,17 +324,24 @@ class KeycloakService extends Keycloak {
   }
 
   // function for binding/registering phone number with user in Keycloak attributes - (callable from frontend)
-  async registerPhoneNumber(userObject, phoneNumber) {
+  async registerPhoneNumber(username, phoneNumber) {
     if (!this.isValidPhoneNumber(phoneNumber)) {
       return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
     }
 
+    let userObjectToBeReturned = { username: username }
+
     const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
     const adminToken = adminData.access_token
 
+    let userObject = await this.getUserDetails(adminToken, username)
+    if (!userObject.attributes) {
+      userObject.attributes = {}
+    }
+
     // getting user attributes from the object and saving phoneNumber & additional information in KC
-    if (userObject.keycloak_User.attributes) {
-      let userObjectAttributes = userObject.keycloak_User.attributes
+    if (userObject.attributes) {
+      let userObjectAttributes = userObject.attributes
       let newAttributes = {}
 
       //checking if some attributes already exist
@@ -340,8 +356,9 @@ class KeycloakService extends Keycloak {
 
       // saving phoneNumber & updating user attributes
       try {
-        await this.updateUserAttributes(adminToken, userObject.keycloak_User.id, newAttributes)
+        await this.updateUserAttributes(adminToken, userObject.id, newAttributes)
         await this.sendOTPviaSMS('+' + phoneNumber)
+
       } catch (error) {
         let err = await errorService.handleError(error)
         return Promise.reject({
@@ -353,19 +370,20 @@ class KeycloakService extends Keycloak {
     else return Promise.reject({ error: 400, error_message: 'Error occurred while fetching user attributes.' })
 
     // updating userObject that is returned to frontend
-    userObject.is2FARegistered = false
-    userObject.twoFAChannel = 'sms'
-    userObject.phoneNumber = '+' + phoneNumber
-    userObject.message = 'OTP required'
 
-    return userObject
+    userObjectToBeReturned.is2FARegistered = false
+    userObjectToBeReturned.twoFAChannel = 'sms'
+    userObjectToBeReturned.phoneNumber = '+' + phoneNumber
+    userObjectToBeReturned.message = 'OTP required'
+
+    return userObjectToBeReturned
   }
 
   // function for generating OTP from Twilio and sending via SMS - (callable from frontend)
   async sendOTPviaSMS(phoneNumber) {
     if (phoneNumber.startsWith('+')) {
       phoneNumber = phoneNumber.slice(1); // remove '+'
-      
+
       if (!this.isValidPhoneNumber(phoneNumber)) {
         return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
       }
@@ -379,7 +397,7 @@ class KeycloakService extends Keycloak {
 
       phoneNumber = '+' + phoneNumber;
     }
-    
+
     try {
       await twilioClient.verify.v2.services(keycloakConfig.TWILIO_VERIFY_SID)
         .verifications
@@ -395,12 +413,12 @@ class KeycloakService extends Keycloak {
   }
 
   // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
-  async validateOTP(userObject, otpToValidate) {
+  async validateOTP(username, password, realm, otpToValidate) {
     const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
     const adminToken = adminData.access_token
 
     // getting user details for fetching attributes and otpSecret or OTP validation
-    let userDetails = await this.getUserDetails(adminToken, userObject.keycloak_User.username)
+    let userDetails = await this.getUserDetails(adminToken, username)
     if (userDetails.attributes) {
       let userAttributes = userDetails.attributes
 
@@ -441,7 +459,7 @@ class KeycloakService extends Keycloak {
             .verificationChecks
             .create({ to: userAttributes.phoneNumber[0], code: otpToValidate });
 
-          if(verificationStatus.status !== 'approved')
+          if (verificationStatus.status !== 'approved')
             throw false
 
           // updating user attributes if he is registering for 2FA using SMS OTP
@@ -450,8 +468,8 @@ class KeycloakService extends Keycloak {
             for (let key in userAttributes) {
               newAttributes[key] = userAttributes[key][0]
             }
-            newAttributes.is2FARegistered = true
 
+            newAttributes.is2FARegistered = true
             this.updateUserAttributes(adminToken, userDetails.id, newAttributes)
           }
 
@@ -466,17 +484,16 @@ class KeycloakService extends Keycloak {
     }
     else return Promise.reject({ error: 400, error_message: 'Error occurred while fetching user attributes.' })
 
+    let userToken = await this.authenticateUserViaKeycloak(username, password, realm)
+
     // deleting otpSecret from response
-    if (userObject.keycloak_User.attributes.otpSecret)
-      delete userObject.keycloak_User.attributes.otpSecret
+    if (userToken.keycloak_User.attributes.otpSecret)
+      delete userToken.keycloak_User.attributes.otpSecret
 
-    if (userObject.keycloak_User.attributes.tempOTPSecret)
-      delete userObject.keycloak_User.attributes.tempOTPSecret
+    if (userToken.keycloak_User.attributes.tempOTPSecret)
+      delete userToken.keycloak_User.attributes.tempOTPSecret
 
-    userObject.keycloak_User.attributes.is2FARegistered = true
-    let { token, access_token, keycloak_User } = userObject
-
-    return { token, access_token, keycloak_User }
+    return userToken
   }
 
   // this function requires an Admin user in keycloak.json having realm-management roles
