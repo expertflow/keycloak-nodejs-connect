@@ -15,6 +15,8 @@ let realmRoles = [];
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
+const twilio = require('twilio')
+let twilioClient = null       // will be initialized in constructor using config file
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
