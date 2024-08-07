@@ -637,31 +637,19 @@ class KeycloakService extends Keycloak {
 
                             let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
 
-                            //Getting role against permission group
-                            let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                              teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+                            //Check for Permission Groups assignment and roles assignment against them
+                            const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
 
-                            let hasRole;
-
-                            if ( isRole ) {
-                              hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
-                            }
-
-
-                            //checking if required roles are assigned to user or not.
-                            if ( isRole && !hasRole ) {
+                            if ( checkUserRoleAndPermissions.error ) {
 
                               reject( {
-                                error_message: "Error Occured While Generating User Access Token",
+                                error_message: "Error Occurred While Generating User Access Token",
                                 error_detail: {
                                   status: 403,
-                                  reason: ( isRole.length > 1 ) ?
-                                    `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
-                                    `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
+                                  reason: checkUserRoleAndPermissions.message
                                 }
                               } );
                             }
-
 
                             delete teamData.permissionGroups;
 
@@ -761,6 +749,87 @@ class KeycloakService extends Keycloak {
       }
     } );
   }
+
+  // Function to check user roles and permissions
+  checkUserRoleAndPermissions( teamData, responseObject ) {
+
+    const userRoles = responseObject.roles;
+    const permissionGroups = teamData.permissionGroups || [];
+
+    const isAgent = userRoles.includes( 'agent' );
+    const isSupervisor = userRoles.includes( 'supervisor' );
+
+    const hasSeniorAgentsPermission = permissionGroups.includes( "senior_agents_permission" );
+    const hasAgentsPermission = permissionGroups.includes( "agents_permission" );
+
+    // Check if permission groups are assigned but no corresponding roles
+    /* if ( permissionGroups.length > 0 && !isAgent && !isSupervisor ) {
+      if ( hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: "No role assigned against senior_agents_permission group. Please assign either agent or supervisor role."
+        };
+      } else if ( hasAgentsPermission ) {
+        return {
+          error: true,
+          message: "No role assigned against agents_permission group. Please assign agent role."
+        };
+      }
+    } */
+
+    // If user is both agent and supervisor
+    if ( isAgent && isSupervisor ) {
+
+      if ( !hasAgentsPermission ) {
+
+        return {
+          error: true,
+          message: "Please assign agents_permission group for users with both agent and supervisor roles."
+        };
+
+      }
+    }
+
+    // If user is supervisor
+    else if ( isSupervisor ) {
+
+      if ( permissionGroups.length === 0 ) {
+
+        return {
+          error: true,
+          message: "No permission group assigned to supervisor, please assign senior_agents_permission group"
+        };
+
+      } else if ( !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: "Please assign senior_agents_permission group instead of agents_permission"
+        };
+      }
+    }
+
+    // If user is agent
+    else if ( isAgent ) {
+
+      if ( permissionGroups.length === 0 ) {
+
+        return {
+          error: true,
+          message: "Please assign agents_permission group if user is normal agent, if user is senior agent then assign senior_agents_permission group"
+        };
+
+      } else if ( !hasAgentsPermission && !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: "Please assign either agents_permission or senior_agents_permission group for agent role"
+        };
+      }
+    }
+
+    // If no error conditions are met
+    return { error: false };
+  }
+
 
   async getUserInfoFromToken( username, token ) {
 
