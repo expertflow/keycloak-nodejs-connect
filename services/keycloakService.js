@@ -1,7 +1,10 @@
 var session = require( "express-session" );
 var Keycloak = require( "keycloak-connect" );
 const Joi = require( "joi" );
+const qrcode = require( "qrcode" );
+const speakeasy = require( 'speakeasy' )
 const parseXMLString = require( "xml2js" ).parseString;
+
 
 var requestController = require( "../controller/requestController.js" );
 var memory = new session.MemoryStore();
@@ -12,6 +15,8 @@ let realmRoles = [];
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
+const twilio = require( 'twilio' )
+let twilioClient = null       // will be initialized in constructor using config file
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
@@ -22,23 +27,103 @@ class KeycloakService extends Keycloak {
     keycloakConfig = { ...config };
     super( { store: memory }, keycloakConfig ); //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
     // this.keycloakConfig = config;
+    if ( keycloakConfig.TWILIO_SID && keycloakConfig.TWILIO_AUTH_TOKEN ) {
+      twilioClient = twilio( keycloakConfig.TWILIO_SID, keycloakConfig.TWILIO_AUTH_TOKEN )
+    }
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken ) {
+  async authenticateUserViaKeycloak( user_name, user_password, realm_name, is2FAEnabled = false, twoFAChannel, finesseUrl, userRoles, finesseToken ) {
 
     let token = "";
 
     // If finesseUrl is empty it means normal keycloak auth is required.
-    if ( finesseUrl == "" ) {
-
+    if ( !finesseUrl || finesseUrl == "" ) {
       token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name );
+      let attributesFromToken = token.keycloak_User.attributes
+
+      if ( is2FAEnabled ) {     // if 2FA is enabled then running the 2FA flow
+        if ( !twoFAChannel || twoFAChannel == '' || ( twoFAChannel !== 'app' && twoFAChannel !== 'sms' ) ) {
+          return Promise.reject( { status: 400, error_message: 'twoFAChannel parameter is empty or invalid' } )
+        }
+
+        // token for only sending info related to 2FA
+        let tempToken = {
+          username: user_name
+        };
+
+        // checking if user attributes in keycloak exist or not to confirm 2FA registration
+        if ( !attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false' ) {
+
+          // appending extra information regarding 2FA in response object
+          tempToken.is2FARegistered = false
+          tempToken.twoFAChannel = twoFAChannel
+          tempToken.message = "2FA registration required"
+
+          // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
+          if ( twoFAChannel == 'app' ) {
+            // QR Code and Secret Code generation based on username
+            const qrSetup = await this.getQRCode( user_name )
+            if ( qrSetup ) {
+              tempToken.otpSecret = qrSetup.secret
+              tempToken.qrImage = qrSetup.image
+            }
+            else return Promise.reject( { error: 404, error_message: 'Error occurred while generating QR code.' } )
+
+            // getting admin access token to update the user attributes
+            const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+            const adminToken = adminData.access_token
+
+            //updating user attributes for 2FA
+            let newAttributes = {}
+            if ( attributesFromToken ) newAttributes = attributesFromToken
+            newAttributes.tempOTPSecret = qrSetup.secret
+            newAttributes.twoFAChannel = 'app'
+            newAttributes.is2FARegistered = false
+
+            // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
+            await this.updateUserAttributes( adminToken, token.keycloak_User.id, newAttributes )
+          }
+        }
+        else if ( attributesFromToken.is2FARegistered[ 0 ] == 'true' ) {     // if user has already registered for 2FA
+          tempToken.is2FARegistered = true
+          tempToken.twoFAChannel = attributesFromToken.twoFAChannel[ 0 ]
+          tempToken.message = "OTP required"
+
+          if ( attributesFromToken.twoFAChannel[ 0 ] == 'sms' ) {
+            if ( !attributesFromToken.phoneNumber ) {
+              return Promise.reject( {
+                error: 404,
+                error_message: 'Error occurred while fetching phoneNumber from user attributes.'
+              } )
+            }
+            await this.sendOTPviaSMS( attributesFromToken.phoneNumber[ 0 ] )
+
+            tempToken.phoneNumber = attributesFromToken.phoneNumber[ 0 ]
+          }
+
+          // deleting otpSecret from response
+          if ( token.keycloak_User.attributes.otpSecret )
+            delete token.keycloak_User.attributes.otpSecret
+        }
+        else {
+          return Promise.reject( {
+            error: 404,
+            error_message: 'Error occurred while verifying user registration for 2FA.'
+          } )
+        }
+
+        return tempToken;
+
+      }
+
       return token;
 
     } else {
 
       // Finesse Auth, takes userRole in argument to create user along with role.
       token = await this.authenticateFinesse( user_name, user_password, finesseUrl, userRoles, finesseToken );
+
       return token;
 
     }
@@ -168,8 +253,253 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+  // function for getting user details (and extracting attributes)
+  async getUserDetails( adminToken, username ) {
+    var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username;
+    let config = {
+      method: "get",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Bearer ${adminToken}`
+      }
+    };
+
+    try {
+
+      let userDetails = await requestController.httpRequest( config, true );
+
+      if ( userDetails.data[ 0 ] ) {
+        return userDetails.data[ 0 ];    // extracting user details from response object
+      }
+      else throw false;
+
+    } catch ( error ) {
+      let err = await errorService.handleError( error )
+      return Promise.reject( { error_message: 'Error occurred while fetching user details.', error_detail: err } );
+    }
+  }
+
+  // function for generating QR code and Secret code based on username
+  async getQRCode( username ) {
+    const secret = speakeasy.generateSecret( { name: username, symbols: false } )
+    let image;
+    try {
+      image = await qrcode.toDataURL( secret.otpauth_url + "&issuer=EFCX" )
+    } catch ( error ) {
+      return false;
+    }
+    return { secret: secret.base32, image }
+  }
+
+  // function for updating user attributes in KeyCloak for 2FA registration
+  async updateUserAttributes( adminToken, userId, attributesToUpdate ) {
+    var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId;
+    let config = {
+      method: "put",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`
+      },
+      data: {
+        attributes: attributesToUpdate
+      }
+    };
+
+    try {
+      await requestController.httpRequest( config, false );
+    } catch ( error ) {
+      let err = await errorService.handleError( error )
+      return Promise.reject( { error_message: 'Error occurred while updating user attributes.', error_detail: err } );
+    }
+  }
+
+  // function for validating phone number
+  isValidPhoneNumber( phoneNumber ) {
+    return /^\d{7,15}$/.test( phoneNumber );
+  }
+
+  // function for binding/registering phone number with user in Keycloak attributes - (callable from frontend)
+  async registerPhoneNumber( username, phoneNumber ) {
+    if ( !this.isValidPhoneNumber( phoneNumber ) ) {
+      return Promise.reject( { error: 400, error_message: 'Invalid phone number' } );
+    }
+
+    let userObjectToBeReturned = { username: username }
+
+    const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+    const adminToken = adminData.access_token
+
+    let userObject = await this.getUserDetails( adminToken, username )
+    if ( !userObject.attributes ) {
+      userObject.attributes = {}
+    }
+
+    // getting user attributes from the object and saving phoneNumber & additional information in KC
+    if ( userObject.attributes ) {
+      let userObjectAttributes = userObject.attributes
+      let newAttributes = {}
+
+      //checking if some attributes already exist
+      if ( Object.keys( userObjectAttributes ).length > 0 ) {
+        for ( let key in userObjectAttributes ) {
+          newAttributes[ key ] = userObjectAttributes[ key ][ 0 ]
+        }
+      }
+      newAttributes.is2FARegistered = false
+      newAttributes.twoFAChannel = 'sms'
+      newAttributes.phoneNumber = '+' + phoneNumber
+
+      // saving phoneNumber & updating user attributes
+      try {
+        await this.updateUserAttributes( adminToken, userObject.id, newAttributes )
+        await this.sendOTPviaSMS( '+' + phoneNumber )
+
+      } catch ( error ) {
+        let err = await errorService.handleError( error )
+        return Promise.reject( {
+          error_message: 'Error occurred while registering phone number.',
+          error_detail: err
+        } );
+      }
+    }
+    else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
+
+    // updating userObject that is returned to frontend
+
+    userObjectToBeReturned.is2FARegistered = false
+    userObjectToBeReturned.twoFAChannel = 'sms'
+    userObjectToBeReturned.phoneNumber = '+' + phoneNumber
+    userObjectToBeReturned.message = 'OTP required'
+
+    return userObjectToBeReturned
+  }
+
+  // function for generating OTP from Twilio and sending via SMS - (callable from frontend)
+  async sendOTPviaSMS( phoneNumber ) {
+    if ( phoneNumber.startsWith( '+' ) ) {
+      phoneNumber = phoneNumber.slice( 1 ); // remove '+'
+
+      if ( !this.isValidPhoneNumber( phoneNumber ) ) {
+        return Promise.reject( { error: 400, error_message: 'Invalid phone number' } );
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+    else {
+      if ( !this.isValidPhoneNumber( phoneNumber ) ) {
+        return Promise.reject( { error: 400, error_message: 'Invalid phone number' } );
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+
+    try {
+      await twilioClient.verify.v2.services( keycloakConfig.TWILIO_VERIFY_SID )
+        .verifications
+        .create( { to: phoneNumber, channel: 'sms' } );
+    } catch ( error ) {
+      return Promise.reject( {
+        error: 400,
+        error_message: 'Error occured while sending OTP via SMS. This may be because of some issue with Twilio Service.'
+      } )
+    }
+
+    return Promise.resolve( 'OTP sent successfully.' )
+  }
+
+  // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
+  async validateOTP( username, password, realm, otpToValidate ) {
+    const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+    const adminToken = adminData.access_token
+
+    // getting user details for fetching attributes and otpSecret or OTP validation
+    let userDetails = await this.getUserDetails( adminToken, username )
+    if ( userDetails.attributes ) {
+      let userAttributes = userDetails.attributes
+
+      if ( !userAttributes.is2FARegistered ) {
+        return Promise.reject( {
+          error: 404,
+          error_message: 'Error occurred while verifying the 2FA registration. This may be because the user has not registered for 2FA.'
+        } )
+      }
+
+      // running OTP validation flow for authenticator app
+      if ( userAttributes.twoFAChannel[ 0 ] == 'app' ) {
+        let secret = userAttributes.otpSecret ? userAttributes.otpSecret[ 0 ] : userAttributes.tempOTPSecret[ 0 ]
+
+        const verified = speakeasy.totp.verify( { secret: secret, encoding: 'base32', token: otpToValidate } );
+        if ( !verified ) return Promise.reject( { error: 401, error_message: 'Invalid OTP.' } );
+
+        // updating user attributes if he is registering for 2FA using G-Auth OTP
+        if ( userAttributes.is2FARegistered[ 0 ] == 'false' ) {
+          let newAttributes = {}
+          for ( let key in userAttributes ) {
+            newAttributes[ key ] = userAttributes[ key ][ 0 ]
+          }
+          if ( newAttributes.tempOTPSecret ) {
+            newAttributes.otpSecret = newAttributes.tempOTPSecret
+            delete newAttributes.tempOTPSecret
+          }
+          newAttributes.is2FARegistered = true
+
+          this.updateUserAttributes( adminToken, userDetails.id, newAttributes )
+        }
+      }
+
+      // running OTP validation flow for SMS
+      else if ( userAttributes.twoFAChannel[ 0 ] == 'sms' ) {
+        try {
+          let verificationStatus = await twilioClient.verify.v2.services( keycloakConfig.TWILIO_VERIFY_SID )
+            .verificationChecks
+            .create( { to: userAttributes.phoneNumber[ 0 ], code: otpToValidate } );
+
+          if ( verificationStatus.status !== 'approved' )
+            throw false
+
+          // updating user attributes if he is registering for 2FA using SMS OTP
+          if ( userAttributes.is2FARegistered[ 0 ] == 'false' ) {
+            let newAttributes = {}
+            for ( let key in userAttributes ) {
+              newAttributes[ key ] = userAttributes[ key ][ 0 ]
+            }
+
+            newAttributes.is2FARegistered = true
+            this.updateUserAttributes( adminToken, userDetails.id, newAttributes )
+          }
+
+        } catch ( error ) {
+          return Promise.reject( {
+            error: 404,
+            error_message: `Error occurred while validating OTP. This may be because of invalid OTP or some issue with Twilio Service.`
+          } )
+        }
+      }
+
+    }
+    else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
+
+    let userToken = await this.authenticateUserViaKeycloak( username, password, realm )
+
+    // deleting otpSecret from response
+    if ( userToken.keycloak_User.attributes.otpSecret )
+      delete userToken.keycloak_User.attributes.otpSecret
+
+    if ( userToken.keycloak_User.attributes.tempOTPSecret )
+      delete userToken.keycloak_User.attributes.tempOTPSecret
+
+    return userToken
+  }
+
+
   // this function requires an Admin user in keycloak.json having realm-management roles
-  async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name ) {
+  async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -287,33 +617,59 @@ class KeycloakService extends Keycloak {
                         delete config.headers.Authorization;
                         delete config.data;
 
+                        //Role to Remove from keycloak user during Update process.
+                        let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
+                        let administrativeRoles = responseObject.roles.filter( role => (
+                          !ignoreRoles.includes( role ) &&
+                          role.indexOf( "default-roles" ) == -1 ) );
+
+
+
                         //Fetching Groups data for each user.
                         try {
 
-                          let permissions = intrsopectionResponse.data.authorization.permissions;
-                          let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.attributes, intrsopectionResponse.data.realm_access.roles, token, permissions );
+                          if ( ( !administrativeRoles.includes( 'agent' ) && !administrativeRoles.includes( 'supervisor' ) ) ) {
 
-                          //Getting role against permission group
-                          let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? 'supervisor' : 'agent' ) ) : undefined;
+                            responseObject.userTeam = {};
+                            responseObject.supervisedTeams = [];
 
-                          //checking if required roles are assigned to user or not.
-                          if ( isRole && !responseObject.roles.includes( isRole ) ) {
+                          } else {
 
-                            reject( {
-                              error_message: "Error Occured While Generating User Access Token",
-                              error_detail: {
-                                status: 403,
-                                reason: `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
-                              }
-                            } );
+                            let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
+
+                            //Getting role against permission group
+                            let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
+                              teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+
+                            let hasRole;
+
+                            if ( isRole ) {
+                              hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
+                            }
+
+
+                            //checking if required roles are assigned to user or not.
+                            if ( isRole && !hasRole ) {
+
+                              reject( {
+                                error_message: "Error Occured While Generating User Access Token",
+                                error_detail: {
+                                  status: 403,
+                                  reason: ( isRole.length > 1 ) ?
+                                    `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
+                                    `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
+                                }
+                              } );
+                            }
+
+
+                            delete teamData.permissionGroups;
+
+                            responseObject.userTeam = teamData.userTeam;
+                            responseObject.supervisedTeams = teamData.supervisedTeams;
                           }
 
 
-                          delete teamData.permissionGroups;
-
-                          responseObject.userTeam = teamData.userTeam;
-                          responseObject.supervisedTeams = teamData.supervisedTeams;
 
                           let finalObject = {
 
@@ -1112,162 +1468,87 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  //function to be used only in teams implementation
-  async getUserSupervisedGroups( userId, attributes, roles, adminToken, permissions ) {
+  async getUserSupervisedGroups( userId, adminToken, type ) {
 
     return new Promise( async ( resolve, reject ) => {
 
+      let team = { userTeam: {}, supervisedTeams: [] };
       let error;
 
       var config = {
-
         method: "get",
         headers: {
           Accept: "application/json",
           "cache-control": "no-cache",
           "Content-Type": "application/x-www-form-urlencoded",
-        }
-
+        },
       };
 
       try {
 
-        //User Groups
-        let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
+        // User Groups
+        let URL = keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
         config.url = URL;
+
+        try {
+
+          let userTeams = await requestController.httpRequest( config, true );
+          const { userTeam, supervisedTeams } = userTeams.data;
+
+          if ( Object.keys( userTeam ).length == 0 && type != 'CX' ) {
+            reject( {
+              error_message: "Error Occured While Fetching User Team.",
+              error_detail: {
+                status: 403,
+                reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
+              }
+            } );
+          }
+
+          team.userTeam = userTeam;
+          team.supervisedTeams = supervisedTeams;
+
+        } catch ( er ) {
+
+          error = await errorService.handleError( er );
+
+          // Log the error and proceed with default values
+          console.error( "Error while fetching user team:", error );
+
+        }
+
+        // User Groups from Keycloak
+        let URL1 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
+        config.url = URL1;
         config.headers.Authorization = "Bearer " + adminToken;
 
         try {
 
           let userGroup = await requestController.httpRequest( config, true );
-          let team = {};
 
           if ( userGroup.data.length != 0 ) {
 
             let groups = userGroup.data;
-            let userTeam = {};
-            let supervisedTeams = [];
-            let supervisedGroupsName = [];
-
-            let filteredTeams = groups.filter( ( group ) => !group.name.includes( "_permission" ) );
-            let permissionGroups = groups.filter( ( group ) => group.name.includes( "_permission" ) );
+            let permissionGroups = groups.filter( group => group.name.includes( "_permission" ) );
 
             if ( permissionGroups.length > 0 ) {
 
               team.permissionGroups = [];
 
               permissionGroups.forEach( perGroup => {
-
                 team.permissionGroups.push( perGroup.name );
               } );
             }
 
-            if ( filteredTeams.length > 0 ) {
-
-              userTeam = {
-                teamId: filteredTeams[ 0 ].id,
-                teamName: filteredTeams[ 0 ].name,
-              };
-
-              team.userTeam = userTeam;
-
-              if ( permissions.length > 0 ) {
-
-                let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
-
-                if ( teamsDashboardPermissions ) {
-
-                  supervisedGroupsName = teamsDashboardPermissions.scopes.map( scope => {
-                    let groupName = scope.split( '-group' );
-                    return groupName[ 0 ];
-                  } );
-                }
-
-              }
-
-              //if ( supervisedGroupsName.length > 0 ) {
-
-              try {
-
-                supervisedTeams = await this.gettingGroupByGroupName( supervisedGroupsName, adminToken );
-
-              } catch ( er ) {
-
-                error = await errorService.handleError( er );
-
-                reject( {
-                  error_message: "Error Occured While Fetching User Team.",
-                  error_detail: error
-                } );
-
-              }
-              //} else {
-
-              delete config.url;
-
-              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
-              config.url = URL2;
-              config.headers.Authorization = "Bearer " + adminToken;
-
-              try {
-
-                let allGroups = await requestController.httpRequest( config, true );
-
-                for ( let group of allGroups.data ) {
-
-                  if ( group.attributes != null ) {
-
-                    if ( 'supervisor' in group.attributes ) {
-
-                      let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
-
-                      if ( supervisors.includes( attributes.user_name[ 0 ] ) && !group.name.includes( "_permission" ) ) {
-
-                        supervisedTeams.push( {
-                          'teamId': group.id,
-                          'teamName': group.name
-                        } );
-                      }
-                    }
-                  }
-
-                }
-
-              } catch ( er ) {
-
-                error = await errorService.handleError( er );
-
-                reject( {
-                  error_message: "Error Occured While Fetching User Supervised Teams.",
-                  error_detail: error
-                } );
-
-              }
-              //}
-
-              team.supervisedTeams = supervisedTeams;
-              resolve( team );
-            }
           }
-
-          reject( {
-            error_message: "Error Occured While Fetching User Team.",
-            error_detail: {
-              status: 403,
-              reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
-            }
-          } );
-
         } catch ( er ) {
 
           error = await errorService.handleError( er );
-
-          reject( {
-            error_message: "Error Occured While Fetching User Team.",
-            error_detail: error
-          } );
-
+          // Log the error and proceed with default values
+          console.error( "Error while fetching user group:", error );
         }
+
+        resolve( team );
 
       } catch ( er ) {
 
@@ -1277,9 +1558,7 @@ class KeycloakService extends Keycloak {
           error_message: "Error Occured While Generating Admin Access Token To Fetch User Team and User Supervised Teams.",
           error_detail: error
         } );
-
       }
-
     } );
   }
 
@@ -2120,6 +2399,8 @@ class KeycloakService extends Keycloak {
 
             try {
 
+              //Checking whether finesse password is updated or not. If updated, update it on keycloak as well without halting login process
+              await this.checkPasswordUpdate( keycloakAdminToken.access_token, finesseLoginResponse.data.username, password );
               //Checking whether finesse user already exist in keycloak and fetch its token
               keycloakAuthToken = await this.getAccessToken( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
               authenticatedByKeycloak = true;
@@ -2130,7 +2411,7 @@ class KeycloakService extends Keycloak {
                   .then( async ( updatedUser ) => {
 
                     //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
-                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ], 'CISCO' );
                   } )
                   .catch( ( err ) => {
 
@@ -2201,7 +2482,7 @@ class KeycloakService extends Keycloak {
                 if ( userCreated.status == 201 ) {
 
                   //Returning the token of recently created User
-                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
+                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, keycloakConfig[ "realm" ], 'CISCO' );
                 }
 
               } catch ( err ) {
@@ -2242,13 +2523,8 @@ class KeycloakService extends Keycloak {
     let assignRole = [];
     let assignGroups = [];
 
-    if ( !keycloakConfig[ "TEAMS_ENABLED" ] ) {
+    assignGroups = userObject.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
 
-      assignGroups = userObject.roles.includes( "supervisor" ) ? [ "Default", "agents_permission", "senior_agents_permission" ] : [ "Default", "agents_permission" ];
-    } else {
-
-      assignGroups = userObject.roles.includes( "supervisor" ) ? [ userObject.group.name, "agents_permission", "senior_agents_permission" ] : [ userObject.group.name, "agents_permission" ];
-    }
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -2288,81 +2564,18 @@ class KeycloakService extends Keycloak {
 
       try {
 
-        let tokenResponse = await requestController.httpRequest( config, false );
+        let newUser = await requestController.httpRequest( config, false );
 
+        //Get the user id at time of creation
+        let userLocation = newUser.headers.location;
+        let userLocationSplit = userLocation.split( "/" );
+        let userId = userLocationSplit[ userLocationSplit.length - 1 ];
+
+        //Get list of all the roles in keycloak realm
+        /* Storing all the realm roles in Global realmRoles list.If some role come from finesse which doesn't
+        exist in realmRoles list then we call keycloak roles api again to update realmRoles list. */
         if ( userObject.roles != [] ) {
 
-          //Get the user id at time of creation
-          let userLocation = tokenResponse.headers.location;
-          let userLocationSplit = userLocation.split( "/" );
-          let userId = userLocationSplit[ userLocationSplit.length - 1 ];
-
-          if ( userObject.roles.includes( "supervisor" ) && keycloakConfig[ "TEAMS_ENABLED" ] ) {
-
-            try {
-
-              let clientId = await this.getClientId( token );
-
-              await Promise.all( userObject.supervisedGroups.map( async ( group ) => {
-
-                /* let groupData = await this.gettingGroupByGroupName( [ group.name ], token );
-
-                if ( groupData.length > 0 ) {
-
-                  let groupDetails = await this.getGroupById( groupData[ 0 ].id, token );
-
-                  if ( groupDetails.attributes != null ) {
-
-                    if ( 'supervisor' in groupDetails.attributes ) {
-
-                      let supervisors = groupDetails.attributes[ 'supervisor' ][ 0 ].split( "," );
-
-                      if ( !( supervisors.includes( userObject.username ) ) ) {
-
-                        groupDetails.attributes.supervisor = [ ` ${groupDetails.attributes[ 'supervisor' ][ 0 ]},${userObject.username}` ];
-                      }
-
-                    } else {
-
-                      groupDetails.attributes.supervisor = [ `${userObject.username}` ];
-                    }
-                  }
-
-                  if ( groupDetails.attributes.supervisor ) {
-
-                    groupData[ 0 ] = groupDetails;
-                    await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
-                  }
-
-                } */
-
-                let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
-
-                if ( !userBasedPolicy.config.users.includes( userId ) ) {
-
-                  //Parsing string quoted array into array.
-                  const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
-                  delete userBasedPolicy.config;
-                  parsedArray.push( userId );
-
-                  userBasedPolicy.users = parsedArray;
-                  let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
-
-                }
-              } ) );
-
-            } catch ( er ) {
-
-              reject( er );
-            }
-
-          }
-
-          //Get list of all the roles in keycloak realm
-          /*
-            Storing all the realm roles in Global realmRoles list. If some role come from finesse which doesn't
-            exist in realmRoles list then we call keycloak roles api again to update realmRoles list.
-          */
           if ( realmRoles.length > 0 ) {
 
             let check = checkForMissingRole( realmRoles, userObject.roles );
@@ -2397,10 +2610,6 @@ class KeycloakService extends Keycloak {
             //assigning role to user
             let roleAssigned = await this.assignRoleToUser( userId, assignRole, token );
 
-            //Role assigned with status
-            if ( roleAssigned.status == 204 ) {
-              resolve( tokenResponse );
-            }
           } catch ( er ) {
 
             let error = await errorService.handleError( er );
@@ -2411,11 +2620,288 @@ class KeycloakService extends Keycloak {
               error_detail: error
             } );
           }
+        }
+
+
+        let ciscoTeamId = userObject.group.id;
+
+        //Check whether team of Agent already exists in CX Core or not
+        let URL1 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
+
+        let config1 = {
+
+          url: URL1,
+          method: "get",
+          headers: {
+            Accept: "application/json",
+            "cache-control": "no-cache",
+            "Content-Type": "application/x-www-form-urlencoded",
+          }
+
+        };
+
+        let config2 = {
+
+          method: "post",
+          headers: {
+            Accept: "application/json",
+            "cache-control": "no-cache",
+            "Content-Type": "application/json",
+          },
+
+        };
+
+
+        try {
+
+          let getAgentCXTeam = await requestController.httpRequest( config1, false );
+
+          let createAgentCXTeam;
+
+          //This means the team doesn't exist in CX Core. We need to create a team
+          if ( getAgentCXTeam.data.length == 0 ) {
+
+            //Setting URL to Create CX team of Agent
+            let URL2 = `${keycloakConfig[ "ef-server-url" ]}team`;
+
+            let data = {
+              "team_Id": userObject.group.id,
+              "team_name": userObject.group.name,
+              "supervisor_Id": "",
+              "source": "CISCO",
+              "created_by": "1"
+            }
+
+            config2.url = URL2;
+            config2.data = data;
+
+            try {
+
+              //Creating CX team of Agent
+              createAgentCXTeam = await requestController.httpRequest( config2, false );
+
+            } catch ( er ) {
+
+              let error = await errorService.handleError( er );
+
+              reject( {
+
+                error_message: "Error Occured While Creating CX Core Team.",
+                error_detail: error
+              } );
+            }
+
+          }
+
+          //First send the newly created user to CX DB.
+          let URL3 = `${keycloakConfig[ "ef-server-url" ]}users/`;
+
+          let data = {
+            "id": userId,
+            "username": userObject.username.toLocaleLowerCase(),
+            "firstName": userObject.firstName,
+            "lastName": userObject.lastName,
+            "roles": userObject.roles
+          }
+
+          config2.url = URL3;
+          config2.data = data;
+
+          try {
+
+            let sendSupUserToCX = await requestController.httpRequest( config2, false );
+
+          } catch ( er ) {
+
+            let error = await errorService.handleError( er );
+
+            reject( {
+
+              error_message: "Error Occured While Sending User Details to CX.",
+              error_detail: error
+            } );
+          }
+
+          //Assign Agent to a team
+          let URL4 = `${keycloakConfig[ "ef-server-url" ]}team/${userObject.group.id}/member`;
+
+          data = {
+            "type": "agent",
+            "usernames": [ userObject.username.toLocaleLowerCase() ]
+          }
+
+          config2.url = URL4;
+          config2.data = data;
+
+          try {
+
+            //Assigning Agent to CX team
+            let assignAgentToTeam = await requestController.httpRequest( config2, false );
+
+          } catch ( er ) {
+
+            let error = await errorService.handleError( er );
+
+            reject( {
+
+              error_message: "Error Occured While Assigning Agent to CX Core Team.",
+              error_detail: error
+            } );
+          }
+
+        } catch ( er ) {
+
+          let error = await errorService.handleError( er );
+
+          reject( {
+
+            error_message: "Error Occured While Fetching CX Core Team.",
+            error_detail: error
+          } );
+        }
+
+
+
+        if ( userObject.roles.includes( "supervisor" ) && userObject.supervisedGroups.length > 0 ) {
+
+          for ( let supervisedGroup of userObject.supervisedGroups ) {
+
+            let supervisorTeamId = supervisedGroup.id;
+
+            //Check whether team of Supervisor already exists in CX Core or not
+            let URL5 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
+
+            config1.url = URL5;
+
+            try {
+
+              let getSupervisorCXTeam = await requestController.httpRequest( config1, false );
+
+              //This means the team doesn't exist in CX Core. We need to create a team
+              if ( getSupervisorCXTeam.data.length == 0 ) {
+
+                //Creating or Updating Supervisor team in CX Core.
+                let URL6 = `${keycloakConfig[ "ef-server-url" ]}team`;
+
+                let data = {
+                  "team_Id": supervisorTeamId,
+                  "team_name": supervisedGroup.name,
+                  "supervisor_Id": userId,
+                  "source": "CISCO",
+                  "created_by": "1"
+                }
+
+                config2.method = 'post';
+                config2.url = URL6;
+                config2.data = data;
+
+                try {
+
+                  //Creating CX team of Supervisor
+                  let createSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                } catch ( er ) {
+
+                  let error = await errorService.handleError( er );
+
+                  reject( {
+
+                    error_message: "Error Occured While Creating CX Core Team.",
+                    error_detail: error
+                  } );
+                }
+
+              } else {
+
+                console.log( getSupervisorCXTeam.data[ 0 ].supervisor_Id );
+
+                //Adding this supervisor as Secondary Supervisor
+                if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
+
+                  //Assign Secondary Supervisor to a team
+                  let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+
+                  data = {
+                    "type": "secondary-supervisor",
+                    "usernames": [ userObject.username.toLocaleLowerCase() ]
+                  }
+
+                  config2.method = 'post';
+                  config2.url = URL7;
+                  config2.data = data;
+
+                  console.log( config2 );
+
+                  try {
+
+                    //Assigning Secondary Supervisor to CX team
+                    let assignSecondarySupervisorToTeam = await requestController.httpRequest( config2, false );
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+
+                      error_message: "Error Occured While Assigning Secondary Supervisor to CX Core Team.",
+                      error_detail: error
+                    } );
+                  }
+
+                } else {
+
+                  //Check whether team of Supervisor already exists in CX Core or not
+                  let URL8 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+
+                  let data = {
+                    "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                    "supervisor_Id": userId
+                  }
+
+                  config2.method = 'put';
+                  config2.url = URL8;
+                  config2.data = data;
+
+
+                  try {
+
+                    //Updating CX team of Supervisor
+                    let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+
+                      error_message: "Error Occured While Updating CX Core Team.",
+                      error_detail: error
+                    } );
+                  }
+                }
+
+              }
+
+
+            } catch ( er ) {
+
+              let error = await errorService.handleError( er );
+
+              reject( {
+
+                error_message: "Error Occured While Fetching CX Core Team.",
+                error_detail: error
+              } );
+            }
+          }
+
+          resolve( newUser );
 
         } else {
 
-          resolve( tokenResponse );
+          resolve( newUser );
         }
+
       } catch ( er ) {
 
         let error = await errorService.handleError( er );
@@ -2448,7 +2934,6 @@ class KeycloakService extends Keycloak {
 
       let data = {};
       let userAttributes;
-      let assignRole = [];
 
       let rolesToAdd;
       let rolesToRemove;
@@ -2504,7 +2989,7 @@ class KeycloakService extends Keycloak {
         }
 
         //Comparing the basic info of Finesse User and Normal User.
-        if ( finObj.username != keyObj.username
+        if ( ( finObj.username ).toLowerCase() != keyObj.username
           || finObj.firstName != keyObj.firstName
           || finObj.lastName != keyObj.lastName
           || ( userAttributes.user_name && finObj.loginName !== userAttributes.user_name[ 0 ] )
@@ -2513,7 +2998,7 @@ class KeycloakService extends Keycloak {
         ) {
 
           data = {
-            username: finObj.username,
+            username: ( finObj.username ).toLowerCase(),
             firstName: finObj.firstName,
             lastName: finObj.lastName,
             attributes: {
@@ -2564,27 +3049,30 @@ class KeycloakService extends Keycloak {
           role.indexOf( "default-roles" ) == -1 ) );
 
         //Updating group data in case it is not similar.
-        let finesseGroups = finObj.roles.includes( "supervisor" ) ? [ finObj.group.name, "agents_permission", "senior_agents_permission" ] : [ finObj.group.name, "agents_permission" ];
+        let finesseGroups = finObj.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
 
         try {
 
           let token = keycloakAdminToken.access_token;
 
-          if ( keycloakConfig[ "TEAMS_ENABLED" ] ) {
+          let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
 
-            let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
+          keycloakGroups = userGroups.map( group => {
+            return {
+              id: group.id,
+              name: group.name
+            }
+          } );
 
-            keycloakGroups = userGroups.map( group => {
-              return {
-                id: group.id,
-                name: group.name
-              }
-            } );
+          //find if senior_agents_permission group is assigned to user already against an agent role.
+          let isSeniorAgent = keycloakGroups.some( group => group.name == 'senior_agents_permission' );
 
-            groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
-            groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group.name ) );
+          if ( isSeniorAgent && keyObj.roles.includes( 'agent' ) && !finesseGroups.includes( 'senior_agents_permission' ) ) {
+            finesseGroups.push( 'senior_agents_permission' );
           }
 
+          groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
+          groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group.name ) );
 
           //Adding and Removing Roles from Keycloak
           try {
@@ -2602,206 +3090,490 @@ class KeycloakService extends Keycloak {
                 rolesPromises.push( removeRolesPromise );
               }
 
-              if ( rolesToAdd.includes( "supervisor" ) ) {
-
-                keycloakAuthToken = await this.getAccessToken( keyObj.username, password, keycloakConfig[ "realm" ] );
-                rptToken = await this.getTokenRPT( keyObj.username, password, keycloakAuthToken.access_token );
-                introspectToken = await this.getIntrospectToken( rptToken.access_token );
-                keyObj.permittedResources.Resources = introspectToken.authorization.permissions;
-              }
-
               // Wait for all promises to complete before moving on
               await Promise.all( rolesPromises );
             }
 
             try {
 
-              if ( keycloakConfig[ "TEAMS_ENABLED" ] ) {
 
+              if ( groupsToAdd.length > 0 ) {
 
-                if ( groupsToAdd.length > 0 ) {
+                //Fetching Ids of all the groups to add to current Keycloak User.
+                groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
+                await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
+              }
 
-                  //Fetching Ids of all the groups to add to current Keycloak User.
-                  groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
-                  await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
+              if ( groupsToRemove.length > 0 ) {
+
+                await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
+              }
+
+              //Checking Agent Case first, if agent team in CX is not same as agent team in finesse then update it
+              let userId = keyObj.id;
+              let config1 = {
+
+                method: "get",
+                headers: {
+                  Accept: "application/json",
+                  "cache-control": "no-cache",
+                  "Content-Type": "application/x-www-form-urlencoded",
                 }
 
-                if ( groupsToRemove.length > 0 ) {
+              };
 
-                  await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
+              //User Groups
+              let URL2 = keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
+              config1.url = URL2;
+
+              let config2 = {
+
+                method: "post",
+                headers: {
+                  Accept: "application/json",
+                  "cache-control": "no-cache",
+                  "Content-Type": "application/json",
+                },
+
+              };
+
+              try {
+
+                let userTeams = await requestController.httpRequest( config1, true );
+
+                const { userTeam, supervisedTeams } = userTeams.data;
+
+                let supervisedTeamsFiltered = [];
+
+                if ( supervisedTeams.length > 0 ) {
+
+                  //Fetching list of all primary and seconday supervised teams of current user (Whether in CX or Cisco)
+                  supervisedTeamsFiltered = supervisedTeams.filter( team => {
+                    const isPrimarySupervisor = team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase();
+                    const isSecondarySupervisor = team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() );
+
+                    return isPrimarySupervisor || isSecondarySupervisor;
+                  } ).map( team => {
+                    let type;
+                    if ( team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) {
+                      type = 'supervisor';
+                    } else if ( team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) ) {
+                      type = 'secondary supervisor';
+                    }
+
+                    return { teamId: team.teamId, teamName: team.teamName, type, source: team.source };
+                  } );
                 }
 
-                let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
-                config.url = URL2;
-                config.method = 'get';
-                delete config.data;
+                //If Agent team in finesse is different from Agent Team in finesse
+                if ( finObj.group.id !== userTeam.teamId ) {
 
-                try {
+                  //We have to both add agent to a team corresponding to Finesse and remove it from CX team.
+                  //Removing agent from CX team first
+                  let URL3 = `${keycloakConfig[ "ef-server-url" ]}team/${userTeam.teamId}/member?type=agent&usernames=${finObj.username.toLowerCase()}`;
 
-                  //Getting all the Cisco Teams that exist in keycloak.
-                  let groupsResponse = await requestController.httpRequest( config, false );
-                  let groupList = groupsResponse.data;
+                  config1.method = 'delete';
+                  config1.url = URL3;
 
-                  let ciscoTeams = groupList.filter( ( group ) => {
-                    return Object.keys( group.attributes ).includes( 'ciscoTeamId' )
-                  } ).map( group => { return { id: group.id, name: group.name } } );
+                  try {
 
-                  //Remove User From Supervising Group
-                  if ( keyObj.permittedResources.Resources.length > 0 ) {
+                    let removeAgentFromCXTeam = await requestController.httpRequest( config1, true );
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+                      error_message: "Error Occurred while Deleting User from a team In Finesse User Login (Update).",
+                      error_detail: error
+                    } );
+
+                  }
+
+                  //Check whether team of Agent already exists in CX Core or not
+                  let URL4 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${finObj.group.id}`;
+
+                  config1.method = 'get';
+                  config1.url = URL4;
+
+
+                  try {
+
+                    let getAgentCXTeam = await requestController.httpRequest( config1, false );
+
+                    let createAgentCXTeam;
+
+                    //This means the team doesn't exist in CX Core. We need to create a team
+                    if ( getAgentCXTeam.data.length == 0 ) {
+
+                      //Setting URL to Create CX team of Agent
+                      let URL5 = `${keycloakConfig[ "ef-server-url" ]}team`;
+
+                      let data = {
+                        "team_Id": finObj.group.id,
+                        "team_name": finObj.group.name,
+                        "supervisor_Id": "",
+                        "source": "CISCO",
+                        "created_by": "1"
+                      }
+
+                      config2.url = URL5;
+                      config2.data = data;
+
+                      try {
+
+                        //Creating CX team of Agent
+                        createAgentCXTeam = await requestController.httpRequest( config2, false );
+
+                      } catch ( er ) {
+
+                        let error = await errorService.handleError( er );
+
+                        reject( {
+
+                          error_message: "Error Occured While Creating CX Core Team To Add User In Finesse User Login (Update).",
+                          error_detail: error
+                        } );
+                      }
+
+                    }
+
+                    //Assign Agent to a team
+                    let URL6 = `${keycloakConfig[ "ef-server-url" ]}team/${finObj.group.id}/member`;
+
+                    data = {
+                      "type": "agent",
+                      "usernames": [ finObj.username.toLowerCase() ]
+                    }
+
+                    config2.url = URL6;
+                    config2.data = data;
 
                     try {
 
-                      let permissions = keyObj.permittedResources.Resources;
+                      //Assigning Agent to CX team
+                      let assignAgentToTeam = await requestController.httpRequest( config2, false );
 
-                      let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
+                    } catch ( er ) {
 
+                      let error = await errorService.handleError( er );
 
-                      if ( teamsDashboardPermissions || finObj.supervisedGroups ) {
+                      reject( {
 
-                        let clientId;
+                        error_message: "Error Occured While Assigning Agent to CX Core Team In Finesse User Login (Update).",
+                        error_detail: error
+                      } );
+                    }
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+                      error_message: "Error Occured While Fetching User Team To Add User In Finesse User Login (Update).",
+                      error_detail: error
+                    } );
+
+                  }
+                }
+
+                //If no team is assigned to supervise to current user in Cisco, remove its all supervised teams from CX
+                if ( !finObj.supervisedGroups && supervisedTeamsFiltered.length > 0 ) {
+
+                  for ( let supervisedTeam of supervisedTeamsFiltered ) {
+
+                    if ( supervisedTeam.source === 'CISCO' ) {
+
+                      if ( supervisedTeam.type === 'secondary supervisor' ) {
+
+                        //Removing user from Secondary Supervisor in CX Core
+                        let URL13 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
+
+                        config2.method = 'delete';
+                        config2.url = URL13;
 
                         try {
 
-                          //Checking whether user has been assigned new groups to supervise or removed from some group as supervisor.
-                          clientId = await this.getClientId( token );
+                          //Updating CX team of Supervisor
+                          let removeSecondarySupervisor = await requestController.httpRequest( config2, false );
 
-                        } catch ( err ) {
+                        } catch ( er ) {
 
-                          reject( err );
-                        }
+                          let error = await errorService.handleError( er );
 
-                        let userToRemoveFromPolicy;
-                        let userToAddInPolicy;
-                        let results = [];
+                          reject( {
 
-                        if ( teamsDashboardPermissions ) {
-
-                          results = teamsDashboardPermissions.scopes.map( scope => {
-                            let groupName = scope.split( '-group' );
-                            return groupName[ 0 ];
+                            error_message: "Error Occured While Updating CX Core Team To Remove Secondary Supervisor.",
+                            error_detail: error
                           } );
                         }
 
-                        //Filtering out only Cisco Teams in result array, so no keycloak teams are removed.
-                        results = results.filter( result => {
-                          return ciscoTeams.some( ( team ) => team.name === result );
-                        } );
 
-                        if ( finObj.supervisedGroups && results.length > 0 ) {
+                      } else {
 
-                          userToRemoveFromPolicy = results.filter( group => !finObj.supervisedGroups.find( finGroup => finGroup.name == group ) );
-                        } else {
+                        //Removing user from Supervising team in CX Core or not
+                        let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
 
-                          userToRemoveFromPolicy = results;
+                        let data = {
+                          "team_name": supervisedTeam.teamName,
+                          "supervisor_Id": null
                         }
 
-                        //find Permission using Permission Name
-                        if ( userToRemoveFromPolicy.length > 0 ) {
-
-                          const removalPromises = [];
-
-                          for ( let group of userToRemoveFromPolicy ) {
-
-                            let removalPolicyPromise = ( async () => {
-                              let policy = await this.getPolicy( `${group} user based policy`, token, clientId );
-
-                              //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
-                              if ( policy.config.users.includes( keyObj.id ) ) {
-
-                                //Parsing string quoted array into array.
-                                let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
-                                let updatedParsedArray = parsedArray.filter( id => id != keyObj.id );
-
-                                delete policy.config;
-                                policy.users = updatedParsedArray;
-
-                                try {
-                                  let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
-
-                                } catch ( er ) {
-                                  reject( er );
-                                }
-
-                              }
-
-                            } )();
-
-                            removalPromises.push( removalPolicyPromise );
-                          }
-
-                          // Wait for all promises to complete before moving on
-                          await Promise.all( removalPromises );
-
-                        }
-
+                        config2.method = 'put';
+                        config2.url = URL7;
+                        config2.data = data;
 
                         try {
 
-                          //Adding user as supervisor to new Teams.
-                          if ( finObj.supervisedGroups ) {
+                          //Updating CX team of Supervisor
+                          let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
 
-                            userToAddInPolicy = finObj.supervisedGroups.filter( group => !results.includes( group.name ) );
+                        } catch ( er ) {
 
-                          }
+                          let error = await errorService.handleError( er );
 
-                          if ( userToAddInPolicy.length > 0 ) {
+                          reject( {
 
-                            const additionPromises = [];
-
-                            for ( let group of userToAddInPolicy ) {
-
-                              let additionPolicyPromise = ( async () => {
-                                let policy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
-
-                                //What if no User is remaining in User-Based Policy after removing current user? Thought for later.
-                                if ( !policy.config.users.includes( keyObj.id ) ) {
-
-                                  //Parsing string quoted array into array.
-                                  let parsedArray = JSON.parse( policy.config.users.replace( /'/g, '"' ) );
-                                  delete policy.config;
-                                  parsedArray.push( keyObj.id );
-                                  policy.users = parsedArray;
-
-                                  try {
-                                    let updatedUserBasedPolicy = await this.updateUserBasedPolicy( policy, token, clientId );
-
-                                  } catch ( er ) {
-                                    reject( er );
-                                  }
-
-                                }
-                              } )();
-
-                              additionPromises.push( additionPolicyPromise );
-
-                            }
-
-                            // Wait for all promises to complete before moving on
-                            await Promise.all( additionPromises );
-
-                          }
-
-                        } catch ( err ) {
-
-                          reject( err );
+                            error_message: "Error Occured While Updating CX Core Team.",
+                            error_detail: error
+                          } );
                         }
                       }
-                    } catch ( err ) {
-
-                      reject( err );
                     }
 
                   }
-                } catch ( err ) {
-
-                  let error = await errorService.handleError( err );
-
-                  reject( {
-
-                    error_message: "Error Occured While Fetching Keycloak Groups List during Cisco User Sync Update Process.",
-                    error_detail: error
-                  } );
                 }
+
+                //Supervisor Case. Filtering out teams to add and teams to remove from Supervisor
+                //First check that We have supervised Groups in finesse
+                if ( finObj.supervisedGroups ) {
+
+                  let finesseSupervisedGroups = finObj.supervisedGroups;
+
+                  // Fetching All the ids of CX Supervised Teams of current Supervisor
+                  const teamIdsInSupervisedTeams = new Set( supervisedTeamsFiltered.map( team => team.teamId ) );
+
+                  // Teams in which we need to add current user as Supervisor
+                  const teamsToAddInCX = finesseSupervisedGroups.filter( item => !teamIdsInSupervisedTeams.has( item.id ) );
+
+                  if ( teamsToAddInCX.length > 0 ) {
+
+                    //Adding current user as supervisor in all the given teamsToAddInCX teams.
+                    for ( let teamToAdd of teamsToAddInCX ) {
+
+                      let supervisorTeamId = teamToAdd.id;
+
+                      //Check whether team of Supervisor already exists in CX Core or not
+                      let URL8 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
+
+                      config1.url = URL8;
+
+                      try {
+
+                        let getSupervisorCXTeam = await requestController.httpRequest( config1, false );
+
+                        //This means the team doesn't exist in CX Core. We need to create a team
+                        if ( getSupervisorCXTeam.data.length == 0 ) {
+
+                          //Creating or Updating Supervisor team in CX Core.
+                          let URL9 = `${keycloakConfig[ "ef-server-url" ]}team`;
+
+                          let data = {
+                            "team_Id": supervisorTeamId,
+                            "team_name": teamToAdd.name,
+                            "supervisor_Id": userId,
+                            "source": "CISCO",
+                            "created_by": "1"
+                          }
+
+                          config2.method = 'post';
+                          config2.url = URL9;
+                          config2.data = data;
+
+                          try {
+
+                            //Creating CX team of Supervisor
+                            let createSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                          } catch ( er ) {
+
+                            let error = await errorService.handleError( er );
+
+                            reject( {
+
+                              error_message: "Error Occured While Creating CX Core Team To Add Supervisor in Finesse User Login (Update).",
+                              error_detail: error
+                            } );
+                          }
+
+                        } else {
+
+                          //If the supervisor is already assigned to team, add current user as secondary supervisor.
+                          if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
+
+                            //Assign Agent to a team
+                            let URL10 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+
+                            data = {
+                              "type": "secondary-supervisor",
+                              "usernames": [ finObj.username.toLowerCase() ]
+                            }
+
+                            config2.method = 'post';
+                            config2.url = URL10;
+                            config2.data = data;
+
+                            try {
+
+                              //Assigning Secondary Supervisor to CX team
+                              let assignSecondarySupervisorToTeam = await requestController.httpRequest( config2, false );
+
+                            } catch ( er ) {
+
+                              let error = await errorService.handleError( er );
+
+                              reject( {
+
+                                error_message: "Error Occured While Assigning Secondary Supervisor to CX Core Team.",
+                                error_detail: error
+                              } );
+                            }
+
+                          } else {
+
+                            //Adding current user as Supervisor to team
+                            let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+
+                            let data = {
+                              "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                              "supervisor_Id": userId
+                            }
+
+                            config2.method = 'put';
+                            config2.url = URL11;
+                            config2.data = data;
+
+
+                            try {
+
+                              //Updating CX team of Supervisor
+                              let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                            } catch ( er ) {
+
+                              let error = await errorService.handleError( er );
+
+                              reject( {
+
+                                error_message: "Error Occured While Updating CX Core Team To Add Supervisor in Finesse User Login (Update).",
+                                error_detail: error
+                              } );
+                            }
+                          }
+
+                        }
+
+                      } catch ( er ) {
+
+                        let error = await errorService.handleError( er );
+
+                        reject( {
+
+                          error_message: "Error Occured While Fetching CX Core Team To Add Supervisor in Finesse User Login (Update).",
+                          error_detail: error
+                        } );
+                      }
+                    }
+                  }
+
+
+                  // Fetching All the ids of Finesse Supervised Teams of current Supervisor
+                  const idsInFinesseSupervisedGroups = new Set( finesseSupervisedGroups.map( item => item.id ) );
+
+                  // Teams in which we need to remove current user as Supervisor
+                  const teamsToRemoveFromCX = supervisedTeamsFiltered.filter( team => !idsInFinesseSupervisedGroups.has( team.teamId ) );
+
+                  //Removing teams that Supervisor is not supervising anymore in finesse.
+                  if ( teamsToRemoveFromCX.length > 0 ) {
+
+                    for ( let supervisedTeam of teamsToRemoveFromCX ) {
+
+                      //Only removing user from supervising teams that are from Cisco
+                      if ( supervisedTeam.source === 'CISCO' ) {
+
+                        if ( supervisedTeam.type === 'secondary supervisor' ) {
+
+                          //Removing user from Secondary Supervisor in CX Core
+                          let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
+
+                          config2.method = 'delete';
+                          config2.url = URL11;
+
+                          try {
+
+                            //Updating CX team of Supervisor
+                            let removeSecondarySupervisor = await requestController.httpRequest( config2, false );
+
+                          } catch ( er ) {
+
+                            let error = await errorService.handleError( er );
+
+                            reject( {
+
+                              error_message: "Error Occured While Updating CX Core Team To Remove Secondary Supervisor.",
+                              error_detail: error
+                            } );
+                          }
+
+
+                        } else {
+
+                          //Removing user from Supervising team in CX Core
+                          let URL12 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+
+                          let data = {
+                            "team_name": supervisedTeam.teamName,
+                            "supervisor_Id": null
+                          }
+
+                          config2.method = 'put';
+                          config2.url = URL12;
+                          config2.data = data;
+
+                          try {
+
+                            //Updating CX team of Supervisor
+                            let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                          } catch ( er ) {
+
+                            let error = await errorService.handleError( er );
+
+                            reject( {
+
+                              error_message: "Error Occured While Updating CX Core Team To Remove Supervisor.",
+                              error_detail: error
+                            } );
+                          }
+                        }
+
+                      }
+
+                    }
+
+                  }
+
+                }
+
+              } catch ( er ) {
+
+                let error = await errorService.handleError( er );
+
+                reject( {
+                  error_message: "Error Occured While Fetching User Team in Finesse User Login (Update).",
+                  error_detail: error
+                } );
+
               }
             } catch ( err ) {
 
@@ -2823,6 +3595,125 @@ class KeycloakService extends Keycloak {
       resolve( [] );
     } );
   }
+
+  async checkPasswordUpdate( adminToken, userName, password ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      let passwordUpdate = false;
+      var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false"
+
+      let config = {
+        method: "get",
+        url: URL,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        }
+      };
+
+      try {
+
+        //First check if the user exists or not in Keycloak, search user by username in Keycloak.
+        let userResponse = await requestController.httpRequest( config, false );
+
+        if ( userResponse.data.length > 0 ) {
+
+          //Since user exists against username, now generate its access-token.
+          /*
+            If the access token is not generated, it means that password on
+            Keycloak side is not valid and should be updated.
+          */
+          try {
+
+            let tokenResponse = await this.getAccessToken( userName, password );
+
+            if ( tokenResponse.access_token ) {
+
+              resolve( [] );
+            }
+
+          } catch ( er ) {
+
+            if ( er.error_detail.status == 401 ) {
+
+              passwordUpdate = true;
+
+            } else {
+
+              let error = await errorService.handleError( er );
+
+              reject( {
+
+                error_message: "Error Occured While Generating User Access Token in Check Updated Password Component.",
+                error_detail: error
+              } );
+            }
+
+          } finally {
+
+            if ( passwordUpdate ) {
+
+              let userId = userResponse.data[ 0 ].id;
+
+              //API URL used to update the password.
+              var URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
+
+              let data = {
+                "temporary": false,
+                "type": "password",
+                "value": password
+              }
+
+              let config2 = {
+                method: "put",
+                url: URL2,
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${adminToken}`,
+                },
+                data: data
+              };
+
+              try {
+
+                //Sending request to Update Password.
+                await requestController.httpRequest( config2, false );
+
+              } catch ( er ) {
+
+                let error = await errorService.handleError( er );
+
+                reject( {
+
+                  error_message: "Error Occured While Updating Password of User in Check Updated Password Component.",
+                  error_detail: error
+                } );
+
+              }
+
+            }
+
+          }
+
+
+        }
+
+        resolve( [] );
+
+      } catch ( er ) {
+
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Error Occured While Searching for User by Username in Check Updated Password Component.",
+          error_detail: error
+        } );
+      }
+    } );
+  }
+
 
   async generateAccessTokenFromRefreshToken( refreshToken ) {
     return new Promise( async ( resolve, reject ) => {
