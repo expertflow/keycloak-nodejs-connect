@@ -1,7 +1,10 @@
 var session = require( "express-session" );
 var Keycloak = require( "keycloak-connect" );
 const Joi = require( "joi" );
+const qrcode = require("qrcode");
+const speakeasy = require('speakeasy')
 const parseXMLString = require( "xml2js" ).parseString;
+
 
 var requestController = require( "../controller/requestController.js" );
 var memory = new session.MemoryStore();
@@ -12,6 +15,8 @@ let realmRoles = [];
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
+const twilio = require('twilio')
+let twilioClient = null       // will be initialized in constructor using config file
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
@@ -22,23 +27,103 @@ class KeycloakService extends Keycloak {
     keycloakConfig = { ...config };
     super( { store: memory }, keycloakConfig ); //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
     // this.keycloakConfig = config;
+    if (keycloakConfig.TWILIO_SID && keycloakConfig.TWILIO_AUTH_TOKEN) {
+      twilioClient = twilio(keycloakConfig.TWILIO_SID, keycloakConfig.TWILIO_AUTH_TOKEN)
+    }
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken ) {
+  async authenticateUserViaKeycloak(user_name, user_password, realm_name, is2FAEnabled = false, twoFAChannel, finesseUrl, userRoles, finesseToken) {
 
     let token = "";
 
     // If finesseUrl is empty it means normal keycloak auth is required.
-    if ( finesseUrl == "" ) {
+    if (!finesseUrl || finesseUrl == "") {
+      token = await this.getKeycloakTokenWithIntrospect(user_name, user_password, realm_name);
+      let attributesFromToken = token.keycloak_User.attributes
 
-      token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, 'CX' );
+      if (is2FAEnabled) {     // if 2FA is enabled then running the 2FA flow
+        if (!twoFAChannel || twoFAChannel == '' || (twoFAChannel !== 'app' && twoFAChannel !== 'sms')) {
+          return Promise.reject({ status: 400, error_message: 'twoFAChannel parameter is empty or invalid' })
+        }
+
+        // token for only sending info related to 2FA
+        let tempToken = {
+          username: user_name
+        };
+
+        // checking if user attributes in keycloak exist or not to confirm 2FA registration
+        if (!attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false') {
+
+          // appending extra information regarding 2FA in response object
+          tempToken.is2FARegistered = false
+          tempToken.twoFAChannel = twoFAChannel
+          tempToken.message = "2FA registration required"
+
+          // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
+          if (twoFAChannel == 'app') {
+            // QR Code and Secret Code generation based on username
+            const qrSetup = await this.getQRCode(user_name)
+            if (qrSetup) {
+              tempToken.otpSecret = qrSetup.secret
+              tempToken.qrImage = qrSetup.image
+            }
+            else return Promise.reject({ error: 404, error_message: 'Error occurred while generating QR code.' })
+
+            // getting admin access token to update the user attributes
+            const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
+            const adminToken = adminData.access_token
+
+            //updating user attributes for 2FA
+            let newAttributes = {}
+            if (attributesFromToken) newAttributes = attributesFromToken
+            newAttributes.tempOTPSecret = qrSetup.secret
+            newAttributes.twoFAChannel = 'app'
+            newAttributes.is2FARegistered = false
+
+            // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
+            await this.updateUserAttributes(adminToken, token.keycloak_User.id, newAttributes)
+          }
+        }
+        else if (attributesFromToken.is2FARegistered[0] == 'true') {     // if user has already registered for 2FA
+          tempToken.is2FARegistered = true
+          tempToken.twoFAChannel = attributesFromToken.twoFAChannel[0]
+          tempToken.message = "OTP required"
+
+          if (attributesFromToken.twoFAChannel[0] == 'sms') {
+            if (!attributesFromToken.phoneNumber) {
+              return Promise.reject({
+                error: 404,
+                error_message: 'Error occurred while fetching phoneNumber from user attributes.'
+              })
+            }
+            await this.sendOTPviaSMS(attributesFromToken.phoneNumber[0])
+
+            tempToken.phoneNumber = attributesFromToken.phoneNumber[0]
+          }
+
+          // deleting otpSecret from response
+          if (token.keycloak_User.attributes.otpSecret)
+            delete token.keycloak_User.attributes.otpSecret
+        }
+        else {
+          return Promise.reject({
+            error: 404,
+            error_message: 'Error occurred while verifying user registration for 2FA.'
+          })
+        }
+
+        return tempToken;
+
+      }
+
       return token;
 
     } else {
 
       // Finesse Auth, takes userRole in argument to create user along with role.
-      token = await this.authenticateFinesse( user_name, user_password, finesseUrl, userRoles, finesseToken );
+      token = await this.authenticateFinesse(user_name, user_password, finesseUrl, userRoles, finesseToken);
+
       return token;
 
     }
@@ -167,6 +252,251 @@ class KeycloakService extends Keycloak {
       }
     } );
   }
+
+  // function for getting user details (and extracting attributes)
+  async getUserDetails(adminToken, username) {
+    var URL = keycloakConfig["auth-server-url"] + "admin/realms/" + keycloakConfig["realm"] + "/users?username=" + username;
+    let config = {
+      method: "get",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Bearer ${adminToken}`
+      }
+    };
+
+    try {
+
+      let userDetails = await requestController.httpRequest(config, true);
+
+      if (userDetails.data[0]) {
+        return userDetails.data[0];    // extracting user details from response object
+      }
+      else throw false;
+
+    } catch (error) {
+      let err = await errorService.handleError(error)
+      return Promise.reject({ error_message: 'Error occurred while fetching user details.', error_detail: err });
+    }
+  }
+
+  // function for generating QR code and Secret code based on username
+  async getQRCode(username) {
+    const secret = speakeasy.generateSecret({ name: username, symbols: false })
+    let image;
+    try {
+      image = await qrcode.toDataURL(secret.otpauth_url + "&issuer=EFCX")
+    } catch (error) {
+      return false;
+    }
+    return { secret: secret.base32, image }
+  }
+
+  // function for updating user attributes in KeyCloak for 2FA registration
+  async updateUserAttributes(adminToken, userId, attributesToUpdate) {
+    var URL = keycloakConfig["auth-server-url"] + "admin/realms/" + keycloakConfig["realm"] + "/users/" + userId;
+    let config = {
+      method: "put",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`
+      },
+      data: {
+        attributes: attributesToUpdate
+      }
+    };
+
+    try {
+      await requestController.httpRequest(config, false);
+    } catch (error) {
+      let err = await errorService.handleError(error)
+      return Promise.reject({ error_message: 'Error occurred while updating user attributes.', error_detail: err });
+    }
+  }
+
+  // function for validating phone number
+  isValidPhoneNumber(phoneNumber) {
+    return /^\d{7,15}$/.test(phoneNumber);
+  }
+
+  // function for binding/registering phone number with user in Keycloak attributes - (callable from frontend)
+  async registerPhoneNumber(username, phoneNumber) {
+    if (!this.isValidPhoneNumber(phoneNumber)) {
+      return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
+    }
+
+    let userObjectToBeReturned = { username: username }
+
+    const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
+    const adminToken = adminData.access_token
+
+    let userObject = await this.getUserDetails(adminToken, username)
+    if (!userObject.attributes) {
+      userObject.attributes = {}
+    }
+
+    // getting user attributes from the object and saving phoneNumber & additional information in KC
+    if (userObject.attributes) {
+      let userObjectAttributes = userObject.attributes
+      let newAttributes = {}
+
+      //checking if some attributes already exist
+      if (Object.keys(userObjectAttributes).length > 0) {
+        for (let key in userObjectAttributes) {
+          newAttributes[key] = userObjectAttributes[key][0]
+        }
+      }
+      newAttributes.is2FARegistered = false
+      newAttributes.twoFAChannel = 'sms'
+      newAttributes.phoneNumber = '+' + phoneNumber
+
+      // saving phoneNumber & updating user attributes
+      try {
+        await this.updateUserAttributes(adminToken, userObject.id, newAttributes)
+        await this.sendOTPviaSMS('+' + phoneNumber)
+
+      } catch (error) {
+        let err = await errorService.handleError(error)
+        return Promise.reject({
+          error_message: 'Error occurred while registering phone number.',
+          error_detail: err
+        });
+      }
+    }
+    else return Promise.reject({ error: 400, error_message: 'Error occurred while fetching user attributes.' })
+
+    // updating userObject that is returned to frontend
+
+    userObjectToBeReturned.is2FARegistered = false
+    userObjectToBeReturned.twoFAChannel = 'sms'
+    userObjectToBeReturned.phoneNumber = '+' + phoneNumber
+    userObjectToBeReturned.message = 'OTP required'
+
+    return userObjectToBeReturned
+  }
+
+  // function for generating OTP from Twilio and sending via SMS - (callable from frontend)
+  async sendOTPviaSMS(phoneNumber) {
+    if (phoneNumber.startsWith('+')) {
+      phoneNumber = phoneNumber.slice(1); // remove '+'
+
+      if (!this.isValidPhoneNumber(phoneNumber)) {
+        return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+    else {
+      if (!this.isValidPhoneNumber(phoneNumber)) {
+        return Promise.reject({ error: 400, error_message: 'Invalid phone number' });
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+
+    try {
+      await twilioClient.verify.v2.services(keycloakConfig.TWILIO_VERIFY_SID)
+        .verifications
+        .create({ to: phoneNumber, channel: 'sms' });
+    } catch (error) {
+      return Promise.reject({
+        error: 400,
+        error_message: 'Error occured while sending OTP via SMS. This may be because of some issue with Twilio Service.'
+      })
+    }
+
+    return Promise.resolve('OTP sent successfully.')
+  }
+
+  // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
+  async validateOTP(username, password, realm, otpToValidate) {
+    const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN)
+    const adminToken = adminData.access_token
+
+    // getting user details for fetching attributes and otpSecret or OTP validation
+    let userDetails = await this.getUserDetails(adminToken, username)
+    if (userDetails.attributes) {
+      let userAttributes = userDetails.attributes
+
+      if (!userAttributes.is2FARegistered) {
+        return Promise.reject({
+          error: 404,
+          error_message: 'Error occurred while verifying the 2FA registration. This may be because the user has not registered for 2FA.'
+        })
+      }
+
+      // running OTP validation flow for authenticator app
+      if (userAttributes.twoFAChannel[0] == 'app') {
+        let secret = userAttributes.otpSecret ? userAttributes.otpSecret[0] : userAttributes.tempOTPSecret[0]
+
+        const verified = speakeasy.totp.verify({ secret: secret, encoding: 'base32', token: otpToValidate });
+        if (!verified) return Promise.reject({ error: 401, error_message: 'Invalid OTP.' });
+
+        // updating user attributes if he is registering for 2FA using G-Auth OTP
+        if (userAttributes.is2FARegistered[0] == 'false') {
+          let newAttributes = {}
+          for (let key in userAttributes) {
+            newAttributes[key] = userAttributes[key][0]
+          }
+          if (newAttributes.tempOTPSecret) {
+            newAttributes.otpSecret = newAttributes.tempOTPSecret
+            delete newAttributes.tempOTPSecret
+          }
+          newAttributes.is2FARegistered = true
+
+          this.updateUserAttributes(adminToken, userDetails.id, newAttributes)
+        }
+      }
+
+      // running OTP validation flow for SMS
+      else if (userAttributes.twoFAChannel[0] == 'sms') {
+        try {
+          let verificationStatus = await twilioClient.verify.v2.services(keycloakConfig.TWILIO_VERIFY_SID)
+            .verificationChecks
+            .create({ to: userAttributes.phoneNumber[0], code: otpToValidate });
+
+          if (verificationStatus.status !== 'approved')
+            throw false
+
+          // updating user attributes if he is registering for 2FA using SMS OTP
+          if (userAttributes.is2FARegistered[0] == 'false') {
+            let newAttributes = {}
+            for (let key in userAttributes) {
+              newAttributes[key] = userAttributes[key][0]
+            }
+
+            newAttributes.is2FARegistered = true
+            this.updateUserAttributes(adminToken, userDetails.id, newAttributes)
+          }
+
+        } catch (error) {
+          return Promise.reject({
+            error: 404,
+            error_message: `Error occurred while validating OTP. This may be because of invalid OTP or some issue with Twilio Service.`
+          })
+        }
+      }
+
+    }
+    else return Promise.reject({ error: 400, error_message: 'Error occurred while fetching user attributes.' })
+
+    let userToken = await this.authenticateUserViaKeycloak(username, password, realm)
+
+    // deleting otpSecret from response
+    if (userToken.keycloak_User.attributes.otpSecret)
+      delete userToken.keycloak_User.attributes.otpSecret
+
+    if (userToken.keycloak_User.attributes.tempOTPSecret)
+      delete userToken.keycloak_User.attributes.tempOTPSecret
+
+    return userToken
+  }
+
 
   // this function requires an Admin user in keycloak.json having realm-management roles
   async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
