@@ -25,6 +25,9 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 ### Functions
 ```
   - authenticateUserViaKeycloak
+  - registerPhoneNumber
+  - sendOTPviaSMS
+  - validateOTP
   - getAccessToken
   - getKeycloakTokenWithIntrospect
   - createResource
@@ -41,22 +44,22 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 ```
 ### Example
 
-```
+```js
   var {NodeAdapter} = require("ef-keycloak-connect");
   const config = require(`${Path_To_Config_File}`);
   const keycloak = new NodeAdapter(config)
 
 ```
   Note here that `config` object is passed as a parameter to constructor of NodeAdapter class. 
-  You can put all the configuration in a file and them import that file in your application
+  You can put all the configuration in a file and then import that file in your application
   OR
   You can create an object containing all the configurations and pass it.
 
 
-Each function returns a promise so
+Each function returns a promise so it should be called with `.then()` and `.catch()` or `async/await`. For example:
 
-```
-keycloak.authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'], 'finesseToken').then((e) => {
+```js
+keycloak.authenticateUserViaKeycloak('admin', 'admin', 'cim', false, '', `https://${finesse_server_url}:${port}`, ['role1','role2'], 'finesseToken').then((e) => {
     console.log("result :" + (e));
 }).catch((er) => {
     console.log("reject error : " + er);
@@ -68,7 +71,7 @@ keycloak.authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_s
 
 Sample `config` is given below:
 
-```
+```json
 {
   "realm": "keycloak_realm_name",
   "auth-server-url": "http://keycloak_server_url}:port/auth/",
@@ -88,7 +91,10 @@ Sample `config` is given below:
   "USERNAME_ADMIN": "admin_name",
   "PASSWORD_ADMIN": "admin_password",
   "SCOPE_NAME": "Any default scope",
-  "bearer-only": true
+  "bearer-only": true,
+  "TWILIO_SID": "yourTwilioSID",
+  "TWILIO_AUTH_TOKEN": "yourTwilioAuthToken",
+  "TWILIO_VERIFY_SID": "yourTwilioVerifySID"
 }
 ```
 Here is the definition of each property defined in config file/object.
@@ -109,11 +115,14 @@ Here is the definition of each property defined in config file/object.
 - **USERNAME_ADMIN:** Keycloak realm admin username.
 - **PASSWORD_ADMIN:** Keycloak realm admin password.
 - **SCOPE_NAME:** Keycloak Client App scope to use as default scope during Authorization.
-- **bearer-only** will keep its value as **true** (This should be set to true for services. If enabled the adapter will not attempt to authenticate users, but only verify bearer tokens. This is OPTIONAL. The default value is false.)
+- **bearer-only:** Will keep its value as **true** (This should be set to true for services. If enabled the adapter will not attempt to authenticate users, but only verify bearer tokens. This is OPTIONAL. The default value is false.)
+- **TWILIO_SID:** Your Twilio Account SID.
+- **TWILIO_AUTH_TOKEN:** Your Twilio account's Auth Token.
+- **TWILIO_VERIFY_SID:** Your Twilio account's Verify Service's SID.
+- *(Each property having TWILIO in its name is optional and is required only in the case of 2FA via SMS.)*
 
-```
-For using keycloak-connect features 
-
+For using keycloak-connect features:
+```js
 var express = require('express');
 var app = express();
 var session = require('express-session');
@@ -168,50 +177,139 @@ var server = app.listen(3000, function () {
 
 ## Functions Description
 
-  >  This is the elaboration of functions exposed by EF Keycloak Adapter. It contains each function name, the arguments/parameters it take and the response each function generate.
+  >  This is the elaboration of functions exposed by EF Keycloak Adapter. It contains each function name, the arguments/parameters it take and the response each function generates.
 
 
-### authenticateUserViaKeycloak(user_name, user_password, realm_name, finesse_server_url, user_roles, finesse_token)
+### authenticateUserViaKeycloak(user_name, user_password, realm_name, is2FAEnabled = false, twoFAChannel, finesseUrl, userRoles, finesseToken)
 
-This function performs 3 functionalities based on arguments/parameters provided.
+This function performs 5 functionalities based on arguments/parameters provided.
 
    - Finesse User Auth and Sync with keycloak (Non SSO).
    - Finesse User Auth and Sync with keycloak (SSO).
    - Keycloak Authentication of User.
+   - Two Factor Authentication of User via Google Authenticator.
+   - Two Factor Authentication of User via SMS.
 
  
- It takes 6 arguments (3  of them are only used for Finesse User Auth ):
+ It takes 8 arguments (last 3 of them are only used for Finesse User Auth):
  
   - user_name: The name of user to authenticate.
   - user_password: The password of user to authenticate.(In case of Finesse SSO instance the password will be empty string i.e **' '**)
   - realm_name: Keycloak realm in which current user exits.
+  - is2FAEnabled: To determine whether to run 2FA flow or not. It is a boolean argument. **TRUE** means that 2FA flow should be run for this user and **FALSE** means the opposite.
+  - twoFAChannel: To determine the channel for which 2FA flow should be run. It only accepts two values, **“app”** or **“sms”**. “app” means that 2FA is required using Google Authenticator and “sms” means that 2FA is required using SMS or phone number. 
   - finesse_server_url: The url of finesse server (In case of normal keycloak auth, send this parameter as **' '**)
   - user_roles: The array containing user_roles, it will be used to assign roles to finesse user while synching it with Keycloak (for normal auth send it as [ ]).
   - finesse_token: acess token for finesse SSO authentication (It will only be passed if Finesse SSO instance is connected, in any other case we will pass empty string **' '** as argument)
 
 ***Finesse User Auth and Sync with keycloak (Non SSO)***
+
  For Finesse User Auth (Non SSO) we use the function as follows
- ```
+ ```js
   authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
  ```
  Finesse User Auth first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
  
 ***Finesse User Auth and Sync with keycloak (SSO)***
+
  For Finesse User Auth (Non SSO) we use the function as follows
-   ```
-   authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
-   ```
+```js
+  authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+```
   Difference between *Finesse User Auth(SSO)* and *Finesse User Auth(Non SSO)* is that SSO uses finesse_token field while Password field remains ' ', while in Non SSO a Password is sent by user and finesse_token field remains ' '
   
-***Keycloak Authentication of User***
-For Keycloak User Auth, we use the function as follows:
+***Keycloak Authentication of User Without 2FA***
 
-```
- authenticateUserViaKeycloak('admin', 'admin','cim','', [],'')
+For Keycloak User Auth without 2FA, we use the function as follows:
+
+```js
+  authenticateUserViaKeycloak('admin', 'admin','cim', false, '');
 ```
 
- Keycloak User Auth ask keycloak whether user exists in keycloak realm or not. If user exists it returns a KeyCloakUser object with the user information.
- 
+ Keycloak User Auth asks Keycloak whether user exists in keycloak realm or not. If user exists, it returns a KeyCloakUser object with the user information, otherwise returns an error.
+
+***Keycloak Authentication of User With 2FA***
+
+For Keycloak User Auth with 2FA, we use the function as follows:
+
+```js
+  authenticateUserViaKeycloak('admin', 'admin','cim', true, 'app');   //if 2FA is required using Google Authenticator
+  authenticateUserViaKeycloak('admin', 'admin','cim', true, 'sms');   //if 2FA is required using SMS
+```
+
+ Keycloak User Auth asks Keycloak whether user exists in keycloak realm or not. If the user does not exist, it returns an error. If the user exists, it then checks whether two-factor authentication (2FA) is required through the `is2FAEnabled` parameter.
+
+ - **If 2FA is not required:** A KeyCloakUser object with user information is returned.
+ - **If 2FA is required:** It checks the channel for which 2FA is required through `twoFAChannel` parameter.
+ - If 2FA is required using **Google Authenticator**:
+   - It checks whether user has already registered for 2FA or not. 
+   - If user has already registered for 2FA, it will ask for the OTP currently visible to user on Google Authenticator app. User will enter this OTP and if OTP is valid, he will be logged in.
+   - If user has not registered for 2FA, it will return a QR code (to be scanned by the app) and a secret code (to be entered manually; if user is unable to scan). User will scan QR code, enter the OTP received on Google Authenticator app. If OTP is valid, he will be logged in and will be registered for 2FA.
+ - If 2FA is required using **SMS**:
+   - It checks whether user has already registered for 2FA or not.
+   - If user has already registered for 2FA, it will ask for the OTP received by user via SMS. User will enter this OTP and if OTP is valid, he will be logged in.
+   - If user has not registerd for 2FA, it will ask user to enter his phone number for registration. An OTP will be sent to user's phone number. User will enter this OTP and if OTP is valid, he will be logged in and will be registered for 2FA.
+
+### registerPhoneNumber(username, phoneNumber)
+
+This function registers a phone number against the user attributes in Keycloak for two-factor authentication. It is required in second step of 2FA registration via SMS.
+
+It takes 2 arguments:
+- **username:** Username of the user whose phone number is being registered.
+- **phoneNumber:** The phone number that is being registered.
+
+This function:
+
+- Validates the phone number (containing >7 digits)
+- Fetches the user's attributes from Keycloak
+- Appends new attributes and phone number to fetched attributes
+- Saves the new attributes to Keycloak
+- Overwrites phone number if it is already present in attributes
+- Sends OTP to phone number for confirming registration
+
+It returns following JSON object, if phone number is valid:
+```js
+{
+  "username": "user",
+  "is2FARegistered": false,
+  "twoFAChannel": "sms",
+  "phoneNumber": "+923124567890",
+  "message": "OTP required"
+}
+```
+
+This object states that user's phone number is registered temporarily, if user enter valid OTP in next (3rd) step of registration (`validateOTP()`), his phone number will be registerd permanently for 2FA.
+
+### sendOTPviaSMS(phoneNumber)
+
+This function sends OTP to given phone number using Twilio's Verify Service. It may be used in case of resending OTP while registering for 2FA using SMS.
+
+It only takes one argument; the phone number to which OTP should be sent.
+
+It return a string response stating '***OTP sent successfully.***'.
+
+### validateOTP(username, password, realm, otpToValidate)
+
+This function validates OTP submitted by the user and allows user to be logged in. It can validate the OTP received in both scenarios:
+- Via Google Authenticator app
+- Via SMS
+
+It takes 4 arguments:
+
+1. **username:** Username of the user who is submitting OTP and is trying to authenticates using 2FA.
+2. **password:** Password of the user.
+3. **realm:** Name of the realm in Keycloak to which user belongs.
+4. **otpToValidate:** The OTP to be validated for successful authentication.
+
+This function:
+
+- Validates OTP submitted by the user.
+- If OTP is valid and user is registering for 2FA:
+  - It binds/saves phone number permanently with user attributes in Keycloak for subsequent logins (in case of 2FA using SMS).
+  - It saves OTP secret permanently in user attributes in Keycloak for subsequent logins (in case of 2FA using G-Auth).
+- Returns an error if OTP is invalid.
+- Return KeyCloakUser object if OTP is valid and allows user to be logged in.
+
 ### getAccessToken(user_name, user_password)
 
 This function Authenticates a Keycloak user if exists in given realm and return an object containing access_token, refresh_token but not the role mapping of User.
@@ -345,7 +443,7 @@ Response:
 
   - If the refresh token is valid then a new access token is returned in reponse along with status code 200. 
     
-    ``` 
+    ``` js
     {
       "status": 200,
       "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJqeEMzZDV5VVZRS1ktY3MwSmhQd29DVzllNjB0VkFPQXBIUDlWUlhsejdBIn0.eyJleHAiOjE2NzgyNzIzNDEsImlhdCI6MTY3ODI3MjEwNSwianRpIjoiNWVkMDBiYzgtNDM1MC00MjQ2LTllOTEtYjE4ZGIyMzc5YTI2IiwiaXNzIjoiaHR0cDovLzE5Mi4xNjguMS4yMDQ6ODA4MC9hdXRoL3JlYWxtcy9EZW1vLUtleWNsb2FrLVJlYWxtIiwiYXVkIjoiYWNjb3VudCIsInN1YiI6IjY5OGRkYWFkLTZkZTYtNDY1YS04Mjg1LTQ4MWI5NjZjMmYxNiIsInR5cCI6IkJlYXJlciIsImF6cCI6ImRlbW8ta2V5Y2xvYWstY2xpZW50Iiwic2Vzc2lvbl9zdGF0ZSI6ImM2NTNmNDk5LWJlNzMtNDIyNS05MGU4LThkYjBjNDkwYTc5MCIsImFjciI6IjEiLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1kZW1vLWtleWNsb2FrLXJlYWxtIiwib2ZmbGluZV9hY2Nlc3MiLCJ1bWFfYXV0aG9yaXphdGlvbiIsImFnZW50LXJvbGUiXX0sInJlc291cmNlX2FjY2VzcyI6eyJhY2NvdW50Ijp7InJvbGVzIjpbIm1hbmFnZS1hY2NvdW50IiwibWFuYWdlLWFjY291bnQtbGlua3MiLCJ2aWV3LXByb2ZpbGUiXX19LCJhdXRob3JpemF0aW9uIjp7InBlcm1pc3Npb25zIjpbeyJyc2lkIjoiNDBhNzg1MjYtNjNiNy00NDcwLThkZWEtZjRlZDViNTUwOTUzIiwicnNuYW1lIjoiRGVmYXVsdCBSZXNvdXJjZSJ9XX0sInNjb3BlIjoiZW1haWwgcHJvZmlsZSIsInNpZCI6ImM2NTNmNDk5LWJlNzMtNDIyNS05MGU4LThkYjBjNDkwYTc5MCIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwibmFtZSI6InphcnlhYiByYXphIiwiYWdlbnRFeHRlbnNpb24iOiI4MDgxLDYwMDEiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJ6YXJ5YWIgcmF6YSIsImdpdmVuX25hbWUiOiJ6YXJ5YWIiLCJmYW1pbHlfbmFtZSI6InJhemEiLCJlbWFpbCI6InphcnlhYkBlbWFpbC5jb20ifQ.Y8NVa0OzAPBwtb6cGyhZxMEyv-o_nTA9ZcvXNcmcEMivqTT0dTE95yNKXYxUQuhTAWE6mPJDwuZ0GuEco7hhxQ6IjjH2j0QwjvqEFFi7KNNdIi-yS4q0elNCjxar8zkHY3Gy8a2d7C_9CQuBN-ernV-JYcmGHENlpmJJpyHfZ5aNkzrcHN5b9qDx2-YZm8pkgFuUv8bwogFFeECzclOlrSGHmaiOI1gp2jkUIw8q23LB8YvzdVg5aHgSDcTKD4gXRrG7C_OQRbCmycOtW4iECLlURnlbbF5Rq4vxzrHjRtBAQmVZ86ITP7yDqEPOWfIxHjODDWWHNL2r7dK8OhNK_g"
@@ -353,7 +451,7 @@ Response:
 
  - If the refresh token is invalid then an error message is returned in reponse along with status code 400.
  
- ```
+ ```js
    {
      "status": 400,
      "message": "Refresh Token expired, please login again"
