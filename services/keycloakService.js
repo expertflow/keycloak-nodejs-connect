@@ -33,7 +33,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, is2FAEnabled = false, twoFAChannel, finesseUrl, userRoles, finesseToken ) {
+  async authenticateUserViaKeycloak( user_name, user_password = '', realm_name, is2FAEnabled = false, twoFAChannel = '', finesseUrl = '', userRoles = [], finesseToken = '' ) {
 
     let token = "";
 

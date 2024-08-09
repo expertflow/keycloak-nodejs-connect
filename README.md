@@ -206,7 +206,7 @@ This function performs 5 functionalities based on arguments/parameters provided.
 
  For Finesse User Auth (Non SSO) we use the function as follows
  ```js
-  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
+  authenticateUserViaKeycloak('admin', 'admin','cim',false,'',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
  ```
  Finesse User Auth first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
  
@@ -214,7 +214,7 @@ This function performs 5 functionalities based on arguments/parameters provided.
 
  For Finesse User Auth (Non SSO) we use the function as follows
 ```js
-  authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+  authenticateUserViaKeycloak('johndoe', '','cim',false,'', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
 ```
   Difference between *Finesse User Auth(SSO)* and *Finesse User Auth(Non SSO)* is that SSO uses finesse_token field while Password field remains ' ', while in Non SSO a Password is sent by user and finesse_token field remains ' '
   
@@ -223,7 +223,7 @@ This function performs 5 functionalities based on arguments/parameters provided.
 For Keycloak User Auth without 2FA, we use the function as follows:
 
 ```js
-  authenticateUserViaKeycloak('admin', 'admin','cim', false, '');
+  authenticateUserViaKeycloak('admin', 'admin','cim', false, '','',[],'');
 ```
 
  Keycloak User Auth asks Keycloak whether user exists in keycloak realm or not. If user exists, it returns a KeyCloakUser object with the user information, otherwise returns an error.
@@ -233,8 +233,8 @@ For Keycloak User Auth without 2FA, we use the function as follows:
 For Keycloak User Auth with 2FA, we use the function as follows:
 
 ```js
-  authenticateUserViaKeycloak('admin', 'admin','cim', true, 'app');   //if 2FA is required using Google Authenticator
-  authenticateUserViaKeycloak('admin', 'admin','cim', true, 'sms');   //if 2FA is required using SMS
+  authenticateUserViaKeycloak('admin', 'admin','cim', true, 'app','',[],'');   //if 2FA is required using Google Authenticator
+  authenticateUserViaKeycloak('admin', 'admin','cim', true, 'sms','',[],'');   //if 2FA is required using SMS
 ```
 
  Keycloak User Auth asks Keycloak whether user exists in keycloak realm or not. If the user does not exist, it returns an error. If the user exists, it then checks whether two-factor authentication (2FA) is required through the `is2FAEnabled` parameter.
