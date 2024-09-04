@@ -301,65 +301,66 @@ class KeycloakService extends Keycloak {
 
 
                         //Fetching Groups data for each user.
-                        try {
+                        /* try { */
 
-                          if ( ( !administrativeRoles.includes( 'agent' ) && !administrativeRoles.includes( 'supervisor' ) ) ) {
+                        /* if ( ( !administrativeRoles.includes( 'agent' ) && !administrativeRoles.includes( 'supervisor' ) ) ) {
 
-                            responseObject.userTeam = {};
-                            responseObject.supervisedTeams = [];
+                          responseObject.userTeam = {};
+                          responseObject.supervisedTeams = [];
 
-                          } else {
+                        } else {
 
-                            let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
+                          let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
 
-                            //Getting role against permission group
-                            let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                              teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
+                          //Getting role against permission group
+                          let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
+                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
 
-                            let hasRole;
+                          let hasRole;
 
-                            if ( isRole ) {
-                              hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
-                            }
-
-
-                            //checking if required roles are assigned to user or not.
-                            if ( isRole && !hasRole ) {
-
-                              reject( {
-                                error_message: "Error Occured While Generating User Access Token",
-                                error_detail: {
-                                  status: 403,
-                                  reason: ( isRole.length > 1 ) ?
-                                    `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
-                                    `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
-                                }
-                              } );
-                            }
-
-
-                            delete teamData.permissionGroups;
-
-                            responseObject.userTeam = teamData.userTeam;
-                            responseObject.supervisedTeams = teamData.supervisedTeams;
+                          if ( isRole ) {
+                            hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
                           }
 
 
+                          //checking if required roles are assigned to user or not.
+                          if ( isRole && !hasRole ) {
 
-                          let finalObject = {
+                            reject( {
+                              error_message: "Error Occured While Generating User Access Token",
+                              error_detail: {
+                                status: 403,
+                                reason: ( isRole.length > 1 ) ?
+                                  `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
+                                  `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
+                              }
+                            } );
+                          }
 
-                            token: userToken,
-                            refresh_token: refresh_token,
-                            keycloak_User: responseObject,
 
-                          };
+                          delete teamData.permissionGroups;
 
-                          resolve( finalObject );
+                          responseObject.userTeam = teamData.userTeam;
+                          responseObject.supervisedTeams = teamData.supervisedTeams;
+                        } */
 
-                        } catch ( er ) {
+                        responseObject.userTeam = {};
+                        responseObject.supervisedTeams = [];
+
+                        let finalObject = {
+
+                          token: userToken,
+                          refresh_token: refresh_token,
+                          keycloak_User: responseObject,
+
+                        };
+
+                        resolve( finalObject );
+
+                        /* } catch ( er ) {
 
                           reject( er );
-                        }
+                        } */
 
                       } else {
 
@@ -1953,7 +1954,7 @@ class KeycloakService extends Keycloak {
 
       if ( realmRoles.length > 0 ) {
 
-        let check = checkForMissingRole( realmRoles, roles );
+        let check = this.checkForMissingRole( realmRoles, roles );
 
         if ( !check ) {
 
@@ -2253,7 +2254,7 @@ class KeycloakService extends Keycloak {
 
           if ( realmRoles.length > 0 ) {
 
-            let check = checkForMissingRole( realmRoles, userObject.roles );
+            let check = this.checkForMissingRole( realmRoles, userObject.roles );
 
             if ( !check ) {
 
@@ -3358,6 +3359,124 @@ class KeycloakService extends Keycloak {
 
   }
 
+  async syncExternalUser( encryptedObject ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      try {
+
+        let authenticatedByKeycloak;
+        let keycloakAuthToken = '';
+
+        //Decrypt the encrypted object first
+        let decryptedObject = await this.decryptUserObject( encryptedObject );
+        decryptedObject.userObject.password = '12345';
+
+        //Validate the admin token next
+        let validateAdminToken = await this.getIntrospectToken( decryptedObject.adminToken );
+
+        if ( validateAdminToken.active == false ) {
+
+          reject( {
+
+            error_message: "error occurred while validating the admin access token in sync external user.",
+            error_detail: {
+              status: 401,
+              reason: "invalid/expired admin token"
+            }
+          } )
+        }
+
+        //Now, sync user details to keycloak. First, check if user exists in keycloak or not.
+        try {
+
+          //Checking whether finesse user already exist in keycloak and fetch its token
+          keycloakAuthToken = await this.getAccessToken( ( decryptedObject.userObject.username ).toLowerCase(), decryptedObject.userObject.password, keycloakConfig[ "realm" ] );
+          authenticatedByKeycloak = true;
+
+          console.log( keycloakAuthToken );
+
+
+          this.updateExternalUser( decryptedObject.userObject, decryptedObject.adminToken, keycloakAuthToken, ( decryptedObject.userObject.username ).toLowerCase(), decryptedObject.userObject.password )
+            .then( async ( updatedUser ) => {
+
+              //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
+              keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( decryptedObject.userObject.username ).toLowerCase(), decryptedObject.userObject.password, keycloakConfig[ "realm" ], 'CX' );
+
+              resolve( keycloakAuthToken );
+            } )
+            .catch( ( err ) => {
+
+              reject( err );
+            } );
+
+        } catch ( err ) {
+
+          if ( err.error_detail ) {
+
+            if ( err.error_detail.status == 401 ) {
+
+              console.log( "User doesn't exist in Keycloak, syncing finesse user in keycloak..." );
+            } else {
+
+              reject( err );
+            }
+          } else {
+
+            reject( err );
+          }
+
+        }
+        finally {
+
+          //Finesse User not found in keycloak, so we are going to create one.
+          if ( !authenticatedByKeycloak ) {
+
+            try {
+
+              //Creating Finesse User inside keycloak.
+              let userCreated = await this.createExternalUser( decryptedObject.userObject, decryptedObject.adminToken );
+
+              if ( userCreated.status == 201 ) {
+
+                //Returning the token of recently created User
+                keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( decryptedObject.userObject.username ).toLowerCase(), decryptedObject.userObject.password, keycloakConfig[ "realm" ], 'CX' );
+
+                resolve( keycloakAuthToken );
+              }
+
+            } catch ( err ) {
+
+
+              let error = await errorService.handleError( err );
+
+              reject( {
+
+                error_message: "Error While Creation Of Finesse User In Authenticate/Sync Finesse User Component.",
+                error_detail: error
+              } );
+
+            }
+          }
+        }
+
+
+      } catch ( er ) {
+
+
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Error Occured While Decrypting User Object.",
+          error_detail: error
+        } );
+      }
+
+
+    } )
+  }
+
   async decryptUserObject( encryptedObject ) {
 
     return new Promise( async ( resolve, reject ) => {
@@ -3389,9 +3508,9 @@ class KeycloakService extends Keycloak {
         const decryptedData = decipher.output.toString();
 
         console.log( decryptedData );
+        const userObject = JSON.parse( decryptedData );
 
-        //const userObject = JSON.parse( decryptedData );
-        resolve( decryptedData );
+        resolve( userObject );
 
       } catch ( er ) {
 
@@ -3408,19 +3527,348 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+  async createExternalUser( userObject, token ) {
+
+    let assignRole = [];
+    let assignGroups = [];
+
+    assignGroups = userObject.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
+
+    return new Promise( async ( resolve, reject ) => {
+
+      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users`;
+
+      let data = {
+
+        username: userObject.username,
+        firstName: userObject.firstName,
+        lastName: userObject.lastName,
+        enabled: true,
+        credentials: [
+          {
+            type: "password",
+            value: userObject.password,
+            temporary: false,
+          },
+        ],
+        attributes: {
+          "extension": `${userObject.attributes.extension}`
+        },
+        groups: assignGroups
+      };
+
+      let config = {
+
+        method: "post",
+        url: URL,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        data: data,
+
+      };
+
+      try {
+
+        let newUser = await requestController.httpRequest( config, false );
+
+        //Get the user id at time of creation
+        let userLocation = newUser.headers.location;
+        let userLocationSplit = userLocation.split( "/" );
+        let userId = userLocationSplit[ userLocationSplit.length - 1 ];
+
+        //Get list of all the roles in keycloak realm
+        /* Storing all the realm roles in Global realmRoles list.If some role come from finesse which doesn't
+        exist in realmRoles list then we call keycloak roles api again to update realmRoles list. */
+        if ( userObject.roles != [] ) {
+
+          if ( realmRoles.length > 0 ) {
+
+            let check = this.checkForMissingRole( realmRoles, userObject.roles );
+
+            if ( !check ) {
+
+              realmRoles = await this.getRealmRoles( token );
+            }
+
+          } else {
+
+            realmRoles = await this.getRealmRoles( token );
+          }
+
+          //checking whether role exist in realmRoles object array:
+          for ( let role of realmRoles ) {
+
+            userObject.roles.forEach( ( userRole ) => {
+
+              if ( role.name == userRole.toLocaleLowerCase() ) {
+
+                assignRole.push( {
+                  id: role.id,
+                  name: role.name,
+                } );
+              }
+            } );
+          }
+
+          try {
+
+            //assigning role to user
+            let roleAssigned = await this.assignRoleToUser( userId, assignRole, token );
+
+          } catch ( er ) {
+
+            let error = await errorService.handleError( er );
+
+            reject( {
+
+              error_message: "Error Occured While Assignment of Role To User In Finesse User Creation Component.",
+              error_detail: error
+            } );
+          }
+        }
+
+        resolve( newUser );
 
 
-}
+      } catch ( er ) {
 
-function checkForMissingRole( keycloakRealmRoles, requiredRoles ) {
+        let error = await errorService.handleError( er );
 
-  // Convert the object names to a Set for faster lookup
-  const rolesNamesSet = new Set( keycloakRealmRoles.map( role => role.name ) );
+        reject( {
 
-  // Use the some method to check if at least one role is missing
-  const isMissing = requiredRoles.some( role => !rolesNamesSet.has( role ) );
+          error_message: "Error Occured While Creation Of User In Finesse User Creation Component.",
+          error_detail: error
+        } );
+      }
+    } );
+  }
 
-  return !isMissing;
+  async updateExternalUser( externalObj, keycloakAdminToken, keycloakAuthToken, username, password ) {
+
+    /* 
+        Check for changes in user role, if user is removed from supervisor role then delete all its Permissions/Policies.
+        If supervisor is added to user role then check for the groups it is supervising and create its permissions.
+    
+   
+        Check for changes in user groups, if it is removed from one group as an agent and added to other group then remove
+        user from old group and add to new group
+   
+   
+        Check for teams user is supervising, if user is assigned new teams to supervise then create its permission/policy, if
+        user is removed from supervising certain teams then remove its permissions from that team.
+  */
+
+    return new Promise( async ( resolve, reject ) => {
+
+      let data = {};
+      let userAttributes;
+
+      let rolesToAdd;
+      let rolesToRemove;
+      let groupsToAdd;
+      let groupsToRemove;
+      let keycloakGroups;
+
+
+      try {
+
+        let rptToken = await this.getTokenRPT( username, password, keycloakAuthToken.access_token );
+        let introspectToken = await this.getIntrospectToken( rptToken.access_token );
+
+        let keyObj = {
+          id: introspectToken.sub,
+          username: introspectToken.username,
+          firstName: introspectToken.given_name,
+          lastName: introspectToken.family_name,
+          roles: introspectToken.realm_access.roles,
+          permittedResources: {
+            Resources: introspectToken.authorization.permissions,
+          }
+        }
+
+        //get user attributes to check its user_name and extension
+        let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
+
+        let config = {
+
+          method: "get",
+          url: URL,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${keycloakAdminToken}`,
+          }
+        };
+
+        try {
+
+          let userDataResponse = await requestController.httpRequest( config, false );
+          userAttributes = userDataResponse.data.attributes;
+
+        } catch ( err ) {
+
+          let error = await errorService.handleError( err );
+
+          reject( {
+
+            error_message: "Error Occured While Fetching User Data during Cisco User Sync Update Process.",
+            error_detail: error
+          } );
+
+        }
+
+        //Comparing the basic info of Finesse User and Normal User.
+        if ( ( externalObj.username ).toLowerCase() != keyObj.username
+          || externalObj.firstName != keyObj.firstName
+          || externalObj.lastName != keyObj.lastName
+          || ( externalObj.attributes.extension && externalObj.attributes.extension !== userAttributes.extension[ 0 ] )
+          || ( !userAttributes.user_name )
+        ) {
+
+          data = {
+            username: ( externalObj.username ).toLowerCase(),
+            firstName: externalObj.firstName,
+            lastName: externalObj.lastName,
+            attributes: {
+              "extension": `${externalObj.attributes.extension}`
+            }
+          };
+        }
+
+        if ( Object.keys( data ).length > 0 ) {
+
+
+          let URL1 = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
+
+          config.url = URL1;
+          config.method = 'put';
+          config.data = data;
+
+          try {
+
+            await requestController.httpRequest( config, false );
+
+
+          } catch ( err ) {
+
+            let error = await errorService.handleError( err );
+
+            reject( {
+
+              error_message: "Error Occured While Updating User Info during Cisco User Sync Process.",
+              error_detail: error
+            } );
+
+          }
+
+        }
+
+
+        //Role to Add to keycloak user during Update process.
+        //rolesToAdd = finObj.roles.filter( role => !keyObj.roles.includes( role ) );
+        rolesToAdd = externalObj.roles;
+
+        //Role to Remove from keycloak user during Update process.
+        let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
+        rolesToRemove = keyObj.roles.filter( role => (
+          !externalObj.roles.includes( role ) &&
+          !ignoreRoles.includes( role ) &&
+          role.indexOf( "default-roles" ) == -1 ) );
+
+        //Updating group data in case it is not similar.
+        let externalUserGroups = externalObj.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
+
+        try {
+
+          let token = keycloakAdminToken;
+
+          let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
+
+          keycloakGroups = userGroups.map( group => {
+            return {
+              id: group.id,
+              name: group.name
+            }
+          } );
+
+          //find if senior_agents_permission group is assigned to user already against an agent role.
+          let isSeniorAgent = keycloakGroups.some( group => group.name == 'senior_agents_permission' );
+
+          if ( isSeniorAgent && keyObj.roles.includes( 'agent' ) && !externalUserGroups.includes( 'senior_agents_permission' ) ) {
+            externalUserGroups.push( 'senior_agents_permission' );
+          }
+
+          groupsToAdd = externalUserGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
+          groupsToRemove = keycloakGroups.filter( group => !externalUserGroups.includes( group.name ) );
+
+          //Adding and Removing Roles from Keycloak
+          try {
+
+            if ( rolesToAdd.length > 0 || rolesToRemove.length > 0 ) {
+              const rolesPromises = [];
+
+              if ( rolesToAdd.length > 0 ) {
+                let addRolesPromise = this.addOrRemoveUserRole( keyObj.id, rolesToAdd, 'add', token );
+                rolesPromises.push( addRolesPromise );
+              }
+
+              if ( rolesToRemove.length > 0 ) {
+                let removeRolesPromise = this.addOrRemoveUserRole( keyObj.id, rolesToRemove, 'remove', token );
+                rolesPromises.push( removeRolesPromise );
+              }
+
+              // Wait for all promises to complete before moving on
+              await Promise.all( rolesPromises );
+            }
+
+            try {
+
+
+              if ( groupsToAdd.length > 0 ) {
+
+                //Fetching Ids of all the groups to add to current Keycloak User.
+                groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
+                await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
+              }
+
+              if ( groupsToRemove.length > 0 ) {
+
+                await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
+              }
+
+            } catch ( err ) {
+
+              reject( err );
+            }
+          } catch ( err ) {
+
+            reject( err );
+          }
+        } catch ( err ) {
+
+          reject( err );
+        }
+      } catch ( err ) {
+
+        reject( err );
+      }
+
+      resolve( [] );
+    } );
+  }
+
+
+  checkForMissingRole( keycloakRealmRoles, requiredRoles ) {
+
+    // Convert the object names to a Set for faster lookup
+    const rolesNamesSet = new Set( keycloakRealmRoles.map( role => role.name ) );
+
+    // Use the some method to check if at least one role is missing
+    const isMissing = requiredRoles.some( role => !rolesNamesSet.has( role ) );
+
+    return !isMissing;
+  }
 }
 
 function validateUser( userData ) {
