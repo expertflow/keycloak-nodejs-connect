@@ -78,7 +78,7 @@ class KeycloakService extends Keycloak {
         let error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User Access Token",
+          error_message: "Token Generation Error: Failed to generate a user access token.",
           error_detail: error
         } );
 
@@ -121,7 +121,7 @@ class KeycloakService extends Keycloak {
         let error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User RPT Token",
+          error_message: "Rpt Token Generation Error: Failed to generate a refresh token.",
           error_detail: error
         } );
 
@@ -161,7 +161,7 @@ class KeycloakService extends Keycloak {
         let error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User Introspect Token",
+          error_message: "Introspect Token Generation Error: Failed to generate an introspection token.",
           error_detail: error
         } );
 
@@ -299,7 +299,7 @@ class KeycloakService extends Keycloak {
                           if ( checkUserRoleAndPermissions.error ) {
 
                             reject( {
-                              error_message: "Error Occurred While Generating User Access Token",
+                              error_message: "Token Generation Error: Failed to generate a user access token.",
                               error_detail: {
                                 status: 403,
                                 reason: checkUserRoleAndPermissions.message
@@ -331,10 +331,10 @@ class KeycloakService extends Keycloak {
                       } else {
 
                         reject( {
-                          error_message: "Error Occured While Fetching User Details During Login Process",
+                          error_message: "User Details Fetch Error: Could not retrieve user information during login.",
                           error_detail: {
                             status: 404,
-                            reason: `No User exists against provided Username: ${user_name}`
+                            reason: `User Not Found: The specified username ${user_name} does not exist.`
                           }
                         } );
 
@@ -346,7 +346,7 @@ class KeycloakService extends Keycloak {
                       error = await errorService.handleError( er );
 
                       reject( {
-                        error_message: "Error Occured While Fetching User Details During Login Process",
+                        error_message: "Admin Token Generation Error: Failed to generate an admin access token.",
                         error_detail: error
                       } );
                     }
@@ -357,7 +357,7 @@ class KeycloakService extends Keycloak {
                   error = await errorService.handleError( er );
 
                   reject( {
-                    error_message: "Error Occured While Generating Admin Access Token required for User Authentication Flow",
+                    error_message: "Admin Token Generation Error: Failed to generate an admin access token in user authentication process.",
                     error_detail: error
                   } );
 
@@ -368,7 +368,7 @@ class KeycloakService extends Keycloak {
                 error = await errorService.handleError( er );
 
                 reject( {
-                  error_message: "Error Occured While Generating Introspect Token",
+                  error_message: "Introspect Token Generation Error: Failed to generate an introspection token in user authentication process.",
                   error_detail: error
                 } );
 
@@ -381,9 +381,9 @@ class KeycloakService extends Keycloak {
             error = await errorService.handleError( er );
 
             reject( {
-              error_message: "Error while fetching RPT token, Please make sure all required Roles,Permissions & " +
-                "Groups are assigned to User. e.g: Agent user must be assigned agent role, agents_permission group & all required permissions are created" +
-                ". Every user must be assigned one team, if user is not part of any Team then assign default team to User",
+              error_message: "Rpt Token Fetch Error: Could not fetch the refresh token. Please ensure the user has the necessary roles, permissions, and groups" +
+                ". e.g: agent user must be assigned agent role, agents_permission group & all required permissions are created" +
+                ". every user must be assigned one team, if user is not part of any team then assign default team to User.",
               error_detail: error
             } );
 
@@ -396,7 +396,7 @@ class KeycloakService extends Keycloak {
         error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User Access Token",
+          error_message: "Token Generation Error: Failed to generate a user access token.",
           error_detail: error
         } );
 
@@ -440,7 +440,7 @@ class KeycloakService extends Keycloak {
 
         return {
           error: true,
-          message: "Please assign senior_agents_permission group for users with both agent and supervisor roles."
+          message: "Permission Group Assignment: Please assign the senior_agents_permission group to users with both agent and supervisor roles."
         };
       }
     }
@@ -452,14 +452,14 @@ class KeycloakService extends Keycloak {
 
         return {
           error: true,
-          message: "No permission group assigned to supervisor, please assign senior_agents_permission group"
+          message: "Missing Permission Group: No permission group is assigned to the supervisor role. Please assign the senior_agents_permission group"
         };
 
       } else if ( !hasSeniorAgentsPermission ) {
 
         return {
           error: true,
-          message: "Please assign senior_agents_permission group instead of agents_permission"
+          message: "Incorrect Permission Group: Please assign the senior_agents_permission group instead of the agents_permission group."
         };
       }
     }
@@ -471,14 +471,14 @@ class KeycloakService extends Keycloak {
 
         return {
           error: true,
-          message: "Please assign agents_permission group if user is normal agent, if user is senior agent then assign senior_agents_permission group"
+          message: "Permission Group Assignment: Please assign the agents_permission group to normal agents and the senior_agents_permission group to senior agents."
         };
 
       } else if ( !hasAgentsPermission && !hasSeniorAgentsPermission ) {
 
         return {
           error: true,
-          message: "Please assign either agents_permission or senior_agents_permission group for agent role"
+          message: "Permission Group Requirement: Please assign either the agents_permission or senior_agents_permission group to users with the agent role."
         };
       }
     }
@@ -518,10 +518,10 @@ class KeycloakService extends Keycloak {
         if ( !userInfo.data.active ) {
 
           reject( {
-            error_message: "Error Occured While Getting User Info From Token",
+            error_message: "Token Validation Error: An error occurred while retrieving user information from the token.",
             error_detail: {
               status: 401,
-              reason: `Provided Access Token Expired. Please Provide Valid Access Token`
+              reason: `Expired Token: The provided access token has expired. Please provide a valid access token.`
             }
           } );
 
@@ -535,7 +535,7 @@ class KeycloakService extends Keycloak {
         error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Getting User Info From Token",
+          error_message: "Token Validation Error: An error occurred while retrieving user information from the token.",
           error_detail: error
         } );
       }
@@ -576,7 +576,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching ClientID in ClientID Component.",
+          error_message: "Client ID Fetch Error: An error occurred while fetching the client id",
           error_detail: error
         } );
 
@@ -640,7 +640,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Creating Resource",
+              error_message: "Resource Creation Error: An error occurred while creating the resource.",
               error_detail: error
             } );
 
@@ -654,7 +654,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating P.A.T Token",
+          error_message: "PAT Token Generation Error: An error occurred while generating the personal access token.",
           error_detail: error
         } );
 
@@ -746,7 +746,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Deleting Auth Policy in Delete Resource",
+                  error_message: "Auth Policy Deletion Error: An error occurred while deleting the authorization policy in delete resource component.",
                   error_detail: error
                 } );
               }
@@ -757,7 +757,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Generating Admin Token in Delete Resource",
+                error_message: "Admin Token Generation Error: An error occurred while generating the admin token in delete resource component.",
                 error_detail: error
               } );
 
@@ -768,7 +768,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Deleting Auth Resource",
+              error_message: "Auth Resource Deletion Error: An error occurred while deleting the authorization resource.",
               error_detail: error
             } );
 
@@ -780,7 +780,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating P.A.T Token in Delete Resource",
+          error_message: "PAT Token Generation Error: An error occurred while generating the personal access token.",
           error_detail: error
         } );
       }
@@ -823,7 +823,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Policy For Team Supervisor Assignment During Finesse User Creation.",
+          error_message: "Policy Fetch Error: An error occurred while fetching the policy for team supervisor assignment during Finesse user creation.",
           error_detail: error
         } );
       }
@@ -897,7 +897,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Creating Role Based Policy",
+            error_message: "Role-Based Policy Creation Error: An error occurred while creating the role-based policy.",
             error_detail: error
           } );
         }
@@ -907,7 +907,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Creation OF Policy",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during policy creation.",
           error_detail: error
         } );
       }
@@ -954,7 +954,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Updating User-Based Policy During Finesse User Creation.",
+          error_message: "User-Based Policy Update Error: An error occurred while updating the user-based policy during Finesse user creation.",
           error_detail: error
         } );
 
@@ -1028,7 +1028,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured During Creation Of Auth Permission.",
+            error_message: "Auth Permission Creation Error: An error occurred during the creation of the authorization permission.",
             error_detail: error
           } );
 
@@ -1039,7 +1039,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Creation Of Permission.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during permission creation.",
           error_detail: error
         } );
       }
@@ -1109,7 +1109,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured During Auth Evaluation Process.",
+            error_message: "Auth Evaluation Error: An error occurred during the permission evaluation process.",
             error_detail: error
           } );
         }
@@ -1119,7 +1119,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Resource Evaluation Process.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during the permission evaluation process.",
           error_detail: error
         } );
       }
@@ -1175,7 +1175,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Deletion Of Policy.",
+            error_message: "Policy Deletion Error: An error occurred while deleting the policy.",
             error_detail: error
           } );
         }
@@ -1185,7 +1185,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Deletion Of Policy.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during policy deletion.",
           error_detail: error
         } );
       }
@@ -1319,7 +1319,7 @@ class KeycloakService extends Keycloak {
                   error = await errorService.handleError( er );
 
                   reject( {
-                    error_message: "Error Occured While Fetching User Supervised Teams.",
+                    error_message: "User Supervised Teams Fetch Error: An error occurred while fetching the user's supervised teams.",
                     error_detail: error
                   } );
 
@@ -1332,10 +1332,10 @@ class KeycloakService extends Keycloak {
           }
 
           reject( {
-            error_message: "Error Occured While Fetching User Team.",
+            error_message: "User Team Fetch Error: An error occurred while fetching the user's team.",
             error_detail: {
               status: 403,
-              reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
+              reason: "Missing Team Group: No team group is assigned to the user. Please assign a team to the user. If the user has no team, assign the default group."
             }
           } );
 
@@ -1344,7 +1344,7 @@ class KeycloakService extends Keycloak {
           error = await errorService.handleError( er );
 
           reject( {
-            error_message: "Error Occured While Fetching User Team.",
+            error_message: "User Team Fetch Error: An error occurred while fetching the user's team.",
             error_detail: error
           } );
 
@@ -1355,7 +1355,7 @@ class KeycloakService extends Keycloak {
         error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating Admin Access Token To Fetch User Team and User Supervised Teams.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin access token to fetch the user's team and supervised teams.",
           error_detail: error
         } );
 
@@ -1394,7 +1394,7 @@ class KeycloakService extends Keycloak {
 
         if ( keycloakObj.username != verifyToken.preferred_username ) {
 
-          message = `The data provided in Keycloak Object as an Argument doesn't belong to current Logged-In user.`;
+          message = `Invalid Keycloak Object: The data provided in the Keycloak object as an argument does not belong to the current logged-in user.`;
 
           resolve( {
 
@@ -1464,7 +1464,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Fetching Groups In Team Users List Component.",
+                error_message: "Groups Fetch Error: An error occurred while fetching the groups in the team users list component.",
                 error_detail: error
               } );
             }
@@ -1499,7 +1499,7 @@ class KeycloakService extends Keycloak {
 
                   if ( !group ) {
 
-                    message = `Given User doesn't suprvise any group against id: ${id}`;
+                    message = `No Supervised Groups: The given user does not supervise any group with the specified id: ${id}`;
 
                     resolve( {
                       status: 404,
@@ -1529,16 +1529,16 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Generating Admin Token During Fetching Of Team Users.",
+            error_message: "Admin Token Generation Error: An error occurred while generating the admin token during the fetching of team users.",
             error_detail: error
           } );
 
         }
       }
 
-      message = "Please pass the valid arguments. First argument must be  (should not be empty object," +
-        "must contain valid key-value pair) and Second argument must be Array of groupIds (could be an empty array)" +
-        "3rd Argument must be valid Access Token of current logged-in user.";
+      message = "Invalid Arguments: Please provide valid arguments. The first argument should not be an empty object," +
+        "must contain valid key-value pair. Second argument must be an array of group ids (could be an empty array)" +
+        "3rd argument must be valid access token of current logged in user.";
 
       resolve( {
 
@@ -1637,7 +1637,7 @@ class KeycloakService extends Keycloak {
 
                       reject( {
 
-                        error_message: "Error Occured While Fetching Supervisor Users In Team Members List Component.",
+                        error_message: "Supervisor Users Fetch Error: An error occurred while fetching supervisor users in the team members list component.",
                         error_detail: error
                       } );
                     }
@@ -1679,7 +1679,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Fetching Teams Against TeamIds In Team Members List Component.",
+                  error_message: "Teams Fetch Error: An error occurred while fetching teams against team ids in the team members list component.",
                   error_detail: error
                 } );
 
@@ -1691,7 +1691,7 @@ class KeycloakService extends Keycloak {
 
                   reject( {
 
-                    error_message: "Error Occured While Fetching Teams Against TeamIds In Team Members List Component.",
+                    error_message: "Teams Fetch Error: An error occurred while fetching teams against team ids in the team members list component.",
                     error_detail: error
                   } );
                 }
@@ -1714,7 +1714,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token In Team Members List Component.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token in the team members list component.",
           error_detail: error
         } );
 
@@ -1799,7 +1799,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Fetching Users Against Roles In Get Users By Role Component.",
+                error_message: "Users by Role Fetch Error: An error occurred while fetching users against roles in the get users by role component.",
                 error_detail: error
               } );
             }
@@ -1816,7 +1816,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token In Get Users By Role Component.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token in the get users by role component.",
           error_detail: error
         } );
       }
@@ -1848,7 +1848,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Realm Roles.",
+          error_message: "Realm Roles Fetch Error: An error occurred while fetching realm roles.",
           error_detail: error
         } );
 
@@ -1883,7 +1883,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Assigning Role To User.",
+          error_message: "Role Assignment Error: An error occurred while assigning the role to the user.",
           error_detail: error
         } );
       }
@@ -1916,7 +1916,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Groups of User using UsedId.",
+          error_message: "User Groups Fetch Error: An error occurred while fetching the groups of the user using the user ID.",
           error_detail: error
         } );
       }
@@ -1971,7 +1971,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Fetching Groups using GroupName.",
+            error_message: "Groups by Name Fetch Error: An error occurred while fetching groups using the group name.",
             error_detail: error
           } );
         }
@@ -2011,7 +2011,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Group using GroupId.",
+          error_message: "Group by ID Fetch Error: An error occurred while fetching the group using the group id.",
           error_detail: error
         } );
       }
@@ -2058,7 +2058,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Adding/Removing Roles of User using UsedId.",
+            error_message: "User Roles Modification Error: An error occurred while adding or removing roles of the user using the user id.",
             error_detail: error
           } );
 
@@ -2118,7 +2118,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Adding/Removing Roles of User using UsedId.",
+          error_message: "User Roles Modification Error: An error occurred while adding or removing roles of the user using the user id.",
           error_detail: error
         } );
       }
@@ -2155,7 +2155,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Creation Of Group In Create Group Component.",
+          error_message: "Group Creation Error: An error occurred while creating the group in the create group component.",
           error_detail: error
         } );
       }
@@ -2229,7 +2229,7 @@ class KeycloakService extends Keycloak {
 
                 if ( err.error_detail.status == 401 ) {
 
-                  console.log( "User doesn't exist in Keycloak, syncing finesse user in keycloak..." );
+                  console.log( "User Not Found in Keycloak: User does not exist in Keycloak. Syncing Finesse user in Keycloak." );
                 } else {
 
                   reject( err );
@@ -2246,7 +2246,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error While Fetching Keycloak Admin Token In Authenticate/Sync Finesse User Component.",
+              error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the authenticate/sync finesse user component.",
               error_detail: error
             } );
 
@@ -2272,7 +2272,7 @@ class KeycloakService extends Keycloak {
 
                   reject( {
                     status: 400,
-                    message: "Error while creation of user, error message: " + error.details[ 0 ].message,
+                    message: "User Creation Error: An error occurred while creating the user. Error message: " + error.details[ 0 ].message,
                   } );
                 }
               }
@@ -2295,7 +2295,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error While Creation Of Finesse User In Authenticate/Sync Finesse User Component.",
+                  error_message: "Finesse User Creation Error: An error occurred while creating the Finesse user in the authenticate/sync Finesse user component.",
                   error_detail: error
                 } );
 
@@ -2429,20 +2429,6 @@ class KeycloakService extends Keycloak {
                       let supervisorAttribute = await teamsService.addSupervisorToGroup( groupData, token, keycloakConfig );
                     }
 
-                    /* let userBasedPolicy = await this.getPolicy( `${group.name} user based policy`, token, clientId );
-  
-                    if ( !userBasedPolicy.config.users.includes( userId ) ) {
-  
-                      //Parsing string quoted array into array.
-                      const parsedArray = JSON.parse( userBasedPolicy.config.users.replace( /'/g, '"' ) );
-                      delete userBasedPolicy.config;
-                      parsedArray.push( userId );
-  
-                      userBasedPolicy.users = parsedArray;
-                      let updatedUserBasedPolicy = await this.updateUserBasedPolicy( userBasedPolicy, token, clientId );
-  
-                    } */
-
                   } ) );
                 }
 
@@ -2504,7 +2490,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Assignment of Role To User In Finesse User Creation Component.",
+              error_message: "Role Assignment Error: An error occurred while assigning the role to the user in the finesse user creation component.",
               error_detail: error
             } );
           }
@@ -2519,7 +2505,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Creation Of User In Finesse User Creation Component.",
+          error_message: "User Creation Error: An error occurred while creating the user in the finesse user creation component.",
           error_detail: error
         } );
       }
@@ -2595,7 +2581,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Fetching User Data during Cisco User Sync Update Process.",
+            error_message: "User Data Fetch Error: An error occurred while fetching user data during the cisco user sync update process.",
             error_detail: error
           } );
 
@@ -2641,7 +2627,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Updating User Info during Cisco User Sync Process.",
+              error_message: "User Info Update Error: An error occurred while updating user information during the cisco user sync process.",
               error_detail: error
             } );
 
@@ -3006,7 +2992,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Fetching Keycloak Groups List during Cisco User Sync Update Process.",
+                  error_message: "Keycloak Groups List Fetch Error: An error occurred while fetching the keycloak groups list during the cisco user sync update process.",
                   error_detail: error
                 } );
               }
@@ -3081,7 +3067,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Generating User Access Token in Check Updated Password Component.",
+                error_message: "User Access Token Generation Error: An error occurred while generating the user access token in the check updated password component.",
                 error_detail: error
               } );
             }
@@ -3122,7 +3108,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Updating Password of User in Check Updated Password Component.",
+                  error_message: "Password Update Error: An error occurred while updating the password of the user in the check updated password component.",
                   error_detail: error
                 } );
 
@@ -3143,7 +3129,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Searching for User by Username in Check Updated Password Component.",
+          error_message: "User Search Error: An error occurred while searching for the user by username in the check updated password component.",
           error_detail: error
         } );
       }
@@ -3180,7 +3166,7 @@ class KeycloakService extends Keycloak {
       } catch ( error ) {
         if ( error.response ) {
           if ( error.response.data.error_description == "Token is not active" ) {
-            error.response.data.error_description = "Refresh Token expired, please login again";
+            error.response.data.error_description = "Refresh Token Expired: The refresh token has expired. Please log in again.";
           }
 
           reject( {

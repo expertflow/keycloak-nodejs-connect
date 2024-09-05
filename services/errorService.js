@@ -12,24 +12,24 @@ class ErrorService {
             return err.error_detail;
         }
 
-        if ( err.code ) {
+        if ( err.code && err.code != 'ERR_BAD_REQUEST' ) {
 
             switch ( err.code ) {
 
                 case 'ETIMEDOUT':
                     return {
                         status: 408,
-                        reason: `Keycloak server unaccessable against Keycloak URL, This might be due to Network Issue or Server Unavailability`
+                        reason: `Keycloak Server Inaccessible: The keycloak server is inaccessible at the specified URL. This might be due to a network issue or server unavailability.`
                     };
                 case 'ENOTFOUND':
                     return {
                         status: 404,
-                        reason: `Hostname Not Found, Keycloak server unaccessable against Keycloak URL. Unable to resolve Hostname, This maybe due to wrong Host URL or DNS server issue`,
+                        reason: `Hostname Not Found: The hostname could not be found. The keycloak server is inaccessible at the specified URL. This might be due to a wrong host URL or DNS server issue.`,
                     };
                 case 'EHOSTUNREACH':
                     return {
                         status: 404,
-                        reason: `Hostname Not Found, Keycloak server unaccessable against Keycloak URL. Unable to resolve Hostname, This maybe due to wrong Host URL or DNS server issue`,
+                        reason: `Hostname Not Found: The hostname could not be found. The keycloak server is inaccessible at the specified URL. This might be due to a wrong host URL or DNS server issue.`,
                     };
                 default:
 
@@ -68,29 +68,38 @@ class ErrorService {
 
                                 return {
                                     status: err.response.status,
-                                    reason: 'CLIENT_ID value is not valid in Keycloak Config, please provide a valid CLIENT_ID',
+                                    reason: 'Invalid Client ID: The CLIENT_ID value is not valid in the keycloak configuration. Please provide a valid client id.',
                                 };
                             case 'unauthorized_client':
 
                                 return {
                                     status: err.response.status,
-                                    reason: 'CLIENT_SECRET (credentials.secret in Keycloak Config) value is not valid in Keycloak Config, please provide a valid CLIENT_SECRET',
+                                    reason: 'Invalid Client Secret: The CLIENT_SECRET (credentials.secret in keycloak Config) value is not valid in the keycloak configuration. Please provide a valid client secret.',
                                 };
                             case 'Realm does not exist':
 
                                 return {
                                     status: err.response.status,
-                                    reason: 'Realm is not valid in Keycloak Config, please provide a valid Keycloak Realm',
+                                    reason: 'Invalid Realm: The realm is not valid in the keycloak configuration. Please provide a valid Keycloak realm.',
                                 };
                             case 'invalid_grant':
 
                                 return {
                                     status: err.response.status,
-                                    reason: 'Provided User Credentials are not valid, please provide a valid User Credentials',
+                                    reason: 'Invalid User Credentials: The provided user credentials are not valid. Please provide valid user credentials.',
                                 };
                             default:
 
                                 if ( typeof ( err.response.data ) === "object" ) {
+
+                                    if ( err.response.status == 403 && err.response.data.error == 'unknown_error' ) {
+
+                                        return {
+                                            status: err.response.status,
+                                            reason: 'Missing Admin Roles: Please make sure all the realm-management roles are assigned to admin user.',
+                                        };
+
+                                    }
 
                                     return {
                                         status: err.response.status,
@@ -129,7 +138,7 @@ class ErrorService {
 
             return {
                 status: 'ReferenceError',
-                reason: "Some variable or function either hasn't been declared or is out of scope"
+                reason: "Variable or Function Error: A variable or function has not been declared or is out of scope."
             };
         }
     }
