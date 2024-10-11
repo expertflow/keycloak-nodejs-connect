@@ -80,17 +80,17 @@ class FinesseService {
                 if ( er.code == "ENOTFOUND" ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse",
+                        error_message: "Finesse Authentication Error: An error occurred while authenticating the user via finesse.",
                         error_detail: {
                             status: 408,
-                            reason: `finesse server not accessible against URL: ${finesseUrl}`
+                            reason: `Finesse server not accessible against URL: ${finesseUrl}`
                         }
                     } )
 
                 } else if ( er.response ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse",
+                        error_message: "Finesse Authentication Error: An error occurred while authenticating the user via finesse.",
                         error_detail: {
                             status: er.response.status,
                             reason: er.response.statusText
@@ -172,17 +172,17 @@ class FinesseService {
                 if ( er.code == "ENOTFOUND" ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse SSO",
+                        error_message: "Finesse SSO Authentication Error: An error occurred while authenticating the user using finesse single sign-on.",
                         error_detail: {
                             status: 408,
-                            reason: `finesse server not accessible against URL: ${finesseUrl}`
+                            reason: `Finesse server not accessible against url: ${finesseUrl}`
                         }
                     } )
 
                 } else if ( er.response ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse SSO",
+                        error_message: "Finesse SSO Authentication Error: An error occurred while authenticating the user using finesse single sign-on.",
                         error_detail: {
                             status: er.response.status,
                             reason: er.response.statusText
