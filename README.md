@@ -171,7 +171,7 @@ var server = app.listen(3000, function () {
   >  This is the elaboration of functions exposed by EF Keycloak Adapter. It contains each function name, the arguments/parameters it take and the response each function generate.
 
 
-### authenticateUserViaKeycloak(user_name, user_password, realm_name, finesse_server_url, user_roles, finesse_token)
+### authenticateUserViaKeycloak(user_name, user_password, realm_name, finesse_server_url, agentExtension, finesse_token)
 
 This function performs 3 functionalities based on arguments/parameters provided.
 
@@ -186,20 +186,20 @@ This function performs 3 functionalities based on arguments/parameters provided.
   - user_password: The password of user to authenticate.(In case of Finesse SSO instance the password will be empty string i.e **' '**)
   - realm_name: Keycloak realm in which current user exits.
   - finesse_server_url: The url of finesse server (In case of normal keycloak auth, send this parameter as **' '**)
-  - user_roles: The array containing user_roles, it will be used to assign roles to finesse user while synching it with Keycloak (for normal auth send it as [ ]).
+  - agentExtension: The extension of agent/supervisor logging in to cisco finesse.
   - finesse_token: acess token for finesse SSO authentication (It will only be passed if Finesse SSO instance is connected, in any other case we will pass empty string **' '** as argument)
 
 ***Finesse User Auth and Sync with keycloak (Non SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
  ```
-  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
+  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, '1207','')
  ```
  Finesse User Auth first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
  
 ***Finesse User Auth and Sync with keycloak (SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
    ```
-   authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+   authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, '1207', 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
    ```
   Difference between *Finesse User Auth(SSO)* and *Finesse User Auth(Non SSO)* is that SSO uses finesse_token field while Password field remains ' ', while in Non SSO a Password is sent by user and finesse_token field remains ' '
   
@@ -207,7 +207,7 @@ This function performs 3 functionalities based on arguments/parameters provided.
 For Keycloak User Auth, we use the function as follows:
 
 ```
- authenticateUserViaKeycloak('admin', 'admin','cim','', [],'')
+ authenticateUserViaKeycloak('admin', 'admin','cim','', '','')
 ```
 
  Keycloak User Auth ask keycloak whether user exists in keycloak realm or not. If user exists it returns a KeyCloakUser object with the user information.
@@ -313,7 +313,7 @@ It takes a signle argument:
 
    - adminToken: Admin token is required to authorize the list of roles to return.
 
-### authenticateFinesse(username, password, finesseUrl, userRoles, finesseToken)
+### authenticateFinesse(username, password, finesseUrl, agentExtension, finesseToken)
 
 This function sync finesse user in keycloak, it first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
 
@@ -321,17 +321,17 @@ It takes 5 arguments:
  - user_name: The name of user to authenticate.
  - user_password: The password of user to authenticate.(In case of Finesse SSO instance the password will be empty string i.e **' '**)
  - finesse_server_url: The url of finesse server (In case of normal keycloak auth, send this parameter as **' '**)
- - user_roles: The array containing user_roles, it will be used to assign roles to finesse user while synching it with Keycloak (for normal auth send it as [ ]).
+ - agentExtension: The extension of agent/supervisor logging in to cisco finesse.
  - finesse_token: acess token for finesse SSO authentication (It will be passed if Finesse SSO instance is connected, in case of non SSO will pass empty string **' '** as argument)
  
  ##### Example of SSO Finesse Auth:
  
       
-        authenticateFinesse('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+        authenticateFinesse('johndoe', '', `https://${finesse_server_url}:${port}`, '1207', 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
         
  ##### Example of non SSO Finesse Auth:
       
-      authenticateFinesse('johndoe', '12345', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
+      authenticateFinesse('johndoe', '12345', `https://${finesse_server_url}:${port}`, '1207', '')
 
 ### generateAccessTokenFromRefreshToken(refreshToken)
 
