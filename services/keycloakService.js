@@ -26,7 +26,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, agentExtension, finesseToken ) {
+  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, agentExtension, finesseToken, finesseAdminUsername, finesseAdminPassword ) {
 
     let token = "";
 
@@ -39,7 +39,7 @@ class KeycloakService extends Keycloak {
     } else {
 
       // Finesse Auth, takes userRole in argument to create user along with role.
-      token = await this.authenticateFinesse( user_name, user_password, finesseUrl, agentExtension, finesseToken );
+      token = await this.authenticateFinesse( user_name, user_password, finesseUrl, agentExtension, finesseToken, finesseAdminUsername, finesseAdminPassword );
       return token;
 
     }
@@ -2164,7 +2164,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Authenticating Finesse User
-  async authenticateFinesse( username, password, finesseUrl, agentExtension, finesseToken ) {
+  async authenticateFinesse( username, password, finesseUrl, agentExtension, finesseToken, finesseAdminUsername, finesseAdminPassword ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -2175,7 +2175,7 @@ class KeycloakService extends Keycloak {
         //Handle finesse error cases correctly. (for later)
         if ( finesseToken.length == 0 ) {
 
-          finesseLoginResponse = await finesseService.authenticateUserViaFinesse( username, password, finesseUrl );
+          finesseLoginResponse = await finesseService.authenticateUserViaFinesse( username, password, finesseUrl, finesseAdminUsername, finesseAdminPassword );
 
         } else {
 
