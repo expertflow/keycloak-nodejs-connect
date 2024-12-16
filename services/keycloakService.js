@@ -255,7 +255,7 @@ class KeycloakService extends Keycloak {
 
   // function for getting user details (and extracting attributes)
   async getUserDetails( adminToken, username ) {
-    var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username;
+    var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
     let config = {
       method: "get",
       url: URL,
@@ -584,7 +584,7 @@ class KeycloakService extends Keycloak {
 
                       config.headers.Authorization = "Bearer " + token;
                       config.method = "get";
-                      config.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name;
+                      config.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
                       delete config.data;
 
                       let getuserDetails = await requestController.httpRequest( config, true );
@@ -778,7 +778,7 @@ class KeycloakService extends Keycloak {
     // If user is both agent and supervisor
     if ( isAgent && isSupervisor ) {
 
-      if ( !hasAgentsPermission ) {
+      if ( !hasSeniorAgentsPermission ) {
 
         return {
           error: true,
@@ -3668,7 +3668,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let passwordUpdate = false;
-      var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false"
+      var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false&exact=true"
 
       let config = {
         method: "get",
