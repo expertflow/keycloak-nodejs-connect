@@ -214,7 +214,6 @@ class KeycloakService extends Keycloak {
 
           //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
           try {
-
             var rptResponse = await requestController.httpRequest( config, true );
 
             if ( rptResponse.data.access_token ) {
@@ -269,9 +268,9 @@ class KeycloakService extends Keycloak {
                           lastName: getuserDetails.data[ 0 ].lastName ? getuserDetails.data[ 0 ].lastName : "",
                           username: getuserDetails.data[ 0 ].username,
                           permittedResources: {
-                            Resources: intrsopectionResponse.data.authorization.permissions,
+                            Resources: ( intrsopectionResponse.data.authorization.permissions.length > 0 ) ? intrsopectionResponse.data.authorization.permissions : [],
                           },
-                          roles: intrsopectionResponse.data.realm_access.roles,
+                          roles: ( 'realm_access' in intrsopectionResponse.data && 'roles' in intrsopectionResponse.data.realm_access ) ? intrsopectionResponse.data.realm_access.roles : [],
                           realm: realm_name,
 
                         };
@@ -384,7 +383,10 @@ class KeycloakService extends Keycloak {
               error_message: "Rpt Token Fetch Error: Could not fetch the refresh token. Please ensure the user has the necessary roles, permissions, and groups" +
                 ". e.g: agent user must be assigned agent role, agents_permission group & all required permissions are created" +
                 ". every user must be assigned one team, if user is not part of any team then assign default team to User.",
-              error_detail: error
+              error_detail: {
+                "status": 403,
+                "reason": "Missing role, team or, permissions to log in. Please check with your administrator."
+              }
             } );
 
           }
@@ -407,6 +409,7 @@ class KeycloakService extends Keycloak {
 
   // Function to check user roles and permissions
   checkUserRoleAndPermissions( teamData, responseObject ) {
+
     const userRoles = responseObject.roles;
     const permissionGroups = teamData.permissionGroups || [];
 
@@ -415,23 +418,22 @@ class KeycloakService extends Keycloak {
     const hasSeniorAgentsPermission = permissionGroups.includes( "senior_agents_permission" );
     const hasAgentsPermission = permissionGroups.includes( "agents_permission" );
 
-    // Check if permission groups are assigned but no corresponding roles
-    /* if ( permissionGroups.length > 0 && !isAgent && !isSupervisor ) {
+    if ( userRoles.length < 1 && permissionGroups.length < 1 ) {
 
-      if ( hasSeniorAgentsPermission ) {
+      return {
+        error: true,
+        message: "Missing role or permissions to log in. Please check with your administrator."
+        //message: "Permission Group Assignment: Please assign the senior_agents_permission group to users with both agent and supervisor roles."
+      };
 
-        return {
-          error: true,
-          message: "No role assigned against senior_agents_permission group. Please assign either agent or supervisor role."
-        };
-      } else if ( hasAgentsPermission ) {
+    } else if ( userRoles.length < 1 ) {
 
-        return {
-          error: true,
-          message: "No role assigned against agents_permission group. Please assign agent role."
-        };
-      }
-    } */
+      return ( {
+        error: true,
+        message: `No roles are assigned to log in. Please check with your administrator.`
+      } );
+
+    }
 
     // If user is both agent and supervisor
     if ( isAgent && isSupervisor ) {
@@ -440,7 +442,8 @@ class KeycloakService extends Keycloak {
 
         return {
           error: true,
-          message: "Permission Group Assignment: Please assign the senior_agents_permission group to users with both agent and supervisor roles."
+          message: "You do not have the required permissions to log in. Please check with your administrator."
+          //message: "Permission Group Assignment: Please assign the senior_agents_permission group to users with both agent and supervisor roles."
         };
       }
     }
@@ -452,14 +455,16 @@ class KeycloakService extends Keycloak {
 
         return {
           error: true,
-          message: "Missing Permission Group: No permission group is assigned to the supervisor role. Please assign the senior_agents_permission group"
+          message: "You do not have the required permissions to log in. Please check with your administrator."
+          //message: "Missing Permission Group: No permission group is assigned to the supervisor role. Please assign the senior_agents_permission group"
         };
 
       } else if ( !hasSeniorAgentsPermission ) {
 
         return {
           error: true,
-          message: "Incorrect Permission Group: Please assign the senior_agents_permission group instead of the agents_permission group."
+          message: "You do not have the right permissions to log in. Please check with your administrator."
+          //message: "Incorrect Permission Group: Please assign the senior_agents_permission group instead of the agents_permission group."
         };
       }
     }
@@ -471,14 +476,16 @@ class KeycloakService extends Keycloak {
 
         return {
           error: true,
-          message: "Permission Group Assignment: Please assign the agents_permission group to normal agents and the senior_agents_permission group to senior agents."
+          message: "You do not have the required permissions to log in. Please check with your administrator."
+          //message: "Permission Group Assignment: Please assign the agents_permission group to normal agents and the senior_agents_permission group to senior agents."
         };
 
       } else if ( !hasAgentsPermission && !hasSeniorAgentsPermission ) {
 
         return {
           error: true,
-          message: "Permission Group Requirement: Please assign either the agents_permission or senior_agents_permission group to users with the agent role."
+          message: "You do not have the required permissions to log in. Please check with your administrator."
+          //message: "Permission Group Requirement: Please assign either the agents_permission or senior_agents_permission group to users with the agent role."
         };
       }
     }
@@ -1213,6 +1220,10 @@ class KeycloakService extends Keycloak {
 
       try {
 
+        if ( roles.length > 0 ) {
+          roles = roles.filter( role => ![ 'default-roles-expertflow', 'offline_access', 'uma_authorization' ].includes( role ) );
+        }
+
         //User Groups
         let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
         config.url = URL;
@@ -1223,119 +1234,110 @@ class KeycloakService extends Keycloak {
           let userGroup = await requestController.httpRequest( config, true );
           let team = {};
 
-          if ( userGroup.data.length != 0 ) {
+          let groups = userGroup.data;
+          let userTeam = {};
+          let supervisedTeams = [];
 
-            let groups = userGroup.data;
-            let userTeam = {};
-            let supervisedTeams = [];
-            let supervisedGroupsName = [];
+          let filteredTeams = groups.filter( ( group ) => !group.name.includes( "_permission" ) );
+          let permissionGroups = groups.filter( ( group ) => group.name.includes( "_permission" ) );
 
-            let filteredTeams = groups.filter( ( group ) => !group.name.includes( "_permission" ) );
-            let permissionGroups = groups.filter( ( group ) => group.name.includes( "_permission" ) );
+          if ( filteredTeams.length < 1 && roles.length < 1 ) {
 
-            if ( permissionGroups.length > 0 ) {
-
-              team.permissionGroups = [];
-
-              permissionGroups.forEach( perGroup => {
-
-                team.permissionGroups.push( perGroup.name );
-              } );
-            }
-
-            if ( filteredTeams.length > 0 ) {
-
-              userTeam = {
-                teamId: filteredTeams[ 0 ].id,
-                teamName: filteredTeams[ 0 ].name,
-              };
-
-              team.userTeam = userTeam;
-
-              /*
-              if ( permissions.length > 0 ) {
-
-                let teamsDashboardPermissions = permissions.find( permission => permission.rsname == 'teams' );
-
-                if ( teamsDashboardPermissions ) {
-
-                  supervisedGroupsName = teamsDashboardPermissions.scopes.map( scope => {
-                    let groupName = scope.split( '-group' );
-                    return groupName[ 0 ];
-                  } );
-                }
-
+            reject( {
+              error_message: "User Team Fetch Error: An error occurred while fetching the user's team.",
+              error_detail: {
+                status: 403,
+                reason: "Missing team or role to log in. Please check with your administrator."
+                //reason: "Missing Team Group: No team group is assigned to the user. Please assign a team to the user. If the user has no team, assign the default group."
               }
+            } );
 
-               try {
+          } else if ( filteredTeams.length < 1 && permissionGroups.length < 1 ) {
 
-                supervisedTeams = await this.gettingGroupByGroupName( supervisedGroupsName, adminToken );
+            reject( {
+              error_message: "User Team Fetch Error: An error occurred while fetching the user's team.",
+              error_detail: {
+                status: 403,
+                reason: "Missing team or permissions to log in. Please check with your administrator."
+                //reason: "Missing Team Group: No team group is assigned to the user. Please assign a team to the user. If the user has no team, assign the default group."
+              }
+            } );
+          }
+
+          if ( permissionGroups.length > 0 ) {
+
+            team.permissionGroups = [];
+
+            permissionGroups.forEach( perGroup => {
+
+              team.permissionGroups.push( perGroup.name );
+            } );
+          }
+
+          if ( filteredTeams.length > 0 ) {
+
+            userTeam = {
+              teamId: filteredTeams[ 0 ].id,
+              teamName: filteredTeams[ 0 ].name,
+            };
+
+            team.userTeam = userTeam;
+
+            if ( roles.includes( 'supervisor' ) ) {
+
+              delete config.url;
+
+              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
+              config.url = URL2;
+              config.headers.Authorization = "Bearer " + adminToken;
+
+              try {
+
+                let allGroups = await requestController.httpRequest( config, true );
+
+                for ( let group of allGroups.data ) {
+
+                  if ( group.attributes != null ) {
+
+                    if ( 'supervisor' in group.attributes ) {
+
+                      let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
+
+                      if ( supervisors.includes( username ) && !group.name.includes( "_permission" ) ) {
+
+                        supervisedTeams.push( {
+                          'teamId': group.id,
+                          'teamName': group.name
+                        } );
+                      }
+                    }
+                  }
+
+                }
 
               } catch ( er ) {
 
                 error = await errorService.handleError( er );
 
                 reject( {
-                  error_message: "Error Occured While Fetching User Team.",
+                  error_message: "User Supervised Teams Fetch Error: An error occurred while fetching the user's supervised teams.",
                   error_detail: error
                 } );
 
-              } */
-
-              if ( roles.includes( 'supervisor' ) ) {
-
-                delete config.url;
-
-                let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups?max=10000&briefRepresentation=false";
-                config.url = URL2;
-                config.headers.Authorization = "Bearer " + adminToken;
-
-                try {
-
-                  let allGroups = await requestController.httpRequest( config, true );
-
-                  for ( let group of allGroups.data ) {
-
-                    if ( group.attributes != null ) {
-
-                      if ( 'supervisor' in group.attributes ) {
-
-                        let supervisors = group.attributes[ 'supervisor' ][ 0 ].split( "," );
-
-                        if ( supervisors.includes( username ) && !group.name.includes( "_permission" ) ) {
-
-                          supervisedTeams.push( {
-                            'teamId': group.id,
-                            'teamName': group.name
-                          } );
-                        }
-                      }
-                    }
-
-                  }
-
-                } catch ( er ) {
-
-                  error = await errorService.handleError( er );
-
-                  reject( {
-                    error_message: "User Supervised Teams Fetch Error: An error occurred while fetching the user's supervised teams.",
-                    error_detail: error
-                  } );
-
-                }
               }
-
-              team.supervisedTeams = supervisedTeams;
-              resolve( team );
             }
+
+            team.supervisedTeams = supervisedTeams;
+            resolve( team );
           }
+
 
           reject( {
             error_message: "User Team Fetch Error: An error occurred while fetching the user's team.",
             error_detail: {
               status: 403,
-              reason: "Missing Team Group: No team group is assigned to the user. Please assign a team to the user. If the user has no team, assign the default group."
+              reason: "You are not a part of any team. Please check with your administrator."
+              //reason: "Missing Team Group: No team group is assigned to the user. Please assign a team to the user. If the user has no team, assign the default group."
             }
           } );
 
