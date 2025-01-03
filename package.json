@@ -1,6 +1,6 @@
 {
   "name": "ef-keycloak-connect",
-  "version": "1.7.2-RC8",
+  "version": "1.7.2-RC10",
   "description": "Node JS keycloak adapter for authentication and authorization.",
   "main": "index.js",
   "scripts": {
@@ -13,11 +13,11 @@
   "author": "saqib",
   "license": "ISC",
   "dependencies": {
-    "axios": "^1.7.2",
-    "express": "^4.19.2",
-    "express-session": "^1.18.0",
-    "joi": "^17.13.1",
-    "keycloak-connect": "^24.0.4",
+    "axios": "^1.7.9",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "joi": "^17.13.3",
+    "keycloak-connect": "^26.0.7",
     "xml2js": "^0.6.2"
   }
 }
