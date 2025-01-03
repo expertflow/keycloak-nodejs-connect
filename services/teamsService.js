@@ -91,7 +91,7 @@ class TeamsService {
 
                 let URL = keycloakConfig[ "auth-server-url" ] + 'admin/realms/' + keycloakConfig.realm + '/groups';
 
-                var config = {
+                let config = {
                     method: 'get',
                     url: URL,
                     headers: {
@@ -127,7 +127,7 @@ class TeamsService {
 
                 let URL = keycloakConfig[ "auth-server-url" ] + 'admin/realms/' + keycloakConfig.realm + '/users?max=10000';
 
-                var config = {
+                let config = {
                     method: 'get',
                     url: URL,
                     headers: {
@@ -168,7 +168,7 @@ class TeamsService {
 
                     let URL = keycloakConfig[ "auth-server-url" ] + 'admin/realms/' + keycloakConfig.realm + '/groups/' + group.id;
 
-                    var config = {
+                    let config = {
                         method: 'put',
                         url: URL,
                         headers: {
