@@ -1,15 +1,15 @@
-var session = require( "express-session" );
-var Keycloak = require( "keycloak-connect" );
+let session = require( "express-session" );
+let Keycloak = require( "keycloak-connect" );
 const Joi = require( "joi" );
 const qrcode = require( "qrcode" );
 const speakeasy = require( 'speakeasy' )
 const parseXMLString = require( "xml2js" ).parseString;
 
 
-var requestController = require( "../controller/requestController.js" );
-var memory = new session.MemoryStore();
+let requestController = require( "../controller/requestController.js" );
+let memory = new session.MemoryStore();
 
-var keycloakConfig = null;
+let keycloakConfig = null;
 let realmRoles = [];
 
 const FinesseService = require( "./finesseService" );
@@ -39,7 +39,7 @@ class KeycloakService extends Keycloak {
 
     // If finesseUrl is empty it means normal keycloak auth is required.
     if ( !finesseUrl || finesseUrl == "" ) {
-      token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name );
+      token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, 'CX' );
       let attributesFromToken = token.keycloak_User.attributes
 
       if ( is2FAEnabled ) {     // if 2FA is enabled then running the 2FA flow
@@ -133,7 +133,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -174,7 +174,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -217,7 +217,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
 
       let config = {
         method: "post",
@@ -255,7 +255,7 @@ class KeycloakService extends Keycloak {
 
   // function for getting user details (and extracting attributes)
   async getUserDetails( adminToken, username ) {
-    var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
+    let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
     let config = {
       method: "get",
       url: URL,
@@ -296,7 +296,7 @@ class KeycloakService extends Keycloak {
 
   // function for updating user attributes in KeyCloak for 2FA registration
   async updateUserAttributes( adminToken, userId, attributesToUpdate ) {
-    var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId;
+    let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId;
     let config = {
       method: "put",
       url: URL,
@@ -497,8 +497,6 @@ class KeycloakService extends Keycloak {
     return userToken
   }
 
-
-  // this function requires an Admin user in keycloak.json having realm-management roles
   async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
 
     return new Promise( async ( resolve, reject ) => {
@@ -506,8 +504,9 @@ class KeycloakService extends Keycloak {
       let token;
       let refresh_token;
       let error;
+      let responseObject;
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
       //keycloakConfig["auth-server-url"] +'realms
       let config = {
@@ -537,176 +536,121 @@ class KeycloakService extends Keycloak {
         if ( tokenResponse.data.access_token ) {
 
           token = tokenResponse.data.access_token;
-          config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
-          config.data.audience = keycloakConfig.CLIENT_ID;
-          config.headers.Authorization = "Bearer " + token;
 
-          //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
+          //To fetch introspect token to handle errors.
+          let config_introspect = { ...config };
+          config_introspect.data.token = token;
+          delete config_introspect.data.username;
+          delete config_introspect.data.password;
+
+          config_introspect.url = URL + "/introspect";
+
           try {
 
-            var rptResponse = await requestController.httpRequest( config, true );
+            let intro_token_response = await requestController.httpRequest( config_introspect, true );
 
-            if ( rptResponse.data.access_token ) {
+            if ( Object.keys( intro_token_response.data ).length > 0 ) {
 
-              token = rptResponse.data.access_token;
-              refresh_token = rptResponse.data.refresh_token;
-
-              var userToken = token;
-              config.data.grant_type = keycloakConfig.GRANT_TYPE;
-              config.data.token = token;
-              URL = URL + "/introspect";
-              config.url = URL;
-
-              //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)
               try {
 
-                let intrsopectionResponse = await requestController.httpRequest( config, true );
-                intrsopectionResponse.data.access_token = token;
+                let config1 = { ...config };
+                config1.data.username = keycloakConfig.USERNAME_ADMIN;
+                config1.data.password = keycloakConfig.PASSWORD_ADMIN;
+                delete config1.data.token;
 
-                //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N)
-                try {
+                config1.url = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
-                  config.data.username = keycloakConfig.USERNAME_ADMIN;
-                  config.data.password = keycloakConfig.PASSWORD_ADMIN;
-                  config.url = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
+                let adminTokenResponse = await requestController.httpRequest( config1, true );
 
-                  delete config.data.audience;
-                  delete config.data.token;
-                  delete config.headers.Authorization;
+                if ( adminTokenResponse.data.access_token ) {
 
-                  let adminTokenResponse = await requestController.httpRequest( config, true );
+                  token = adminTokenResponse.data.access_token;
 
-                  if ( adminTokenResponse.data.access_token ) {
+                  try {
 
-                    token = adminTokenResponse.data.access_token;
+                    config1.headers.Authorization = "Bearer " + token;
+                    config1.method = "get";
+                    config1.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
+                    delete config1.data;
 
-                    try {
+                    let getuserDetails = await requestController.httpRequest( config1, true );
 
-                      config.headers.Authorization = "Bearer " + token;
-                      config.method = "get";
-                      config.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
-                      delete config.data;
+                    if ( getuserDetails.data.length !== 0 ) {
 
-                      let getuserDetails = await requestController.httpRequest( config, true );
+                      responseObject = {
 
-                      if ( getuserDetails.data.length !== 0 ) {
+                        id: getuserDetails.data[ 0 ].id,
+                        firstName: getuserDetails.data[ 0 ].firstName ? getuserDetails.data[ 0 ].firstName : "",
+                        lastName: getuserDetails.data[ 0 ].lastName ? getuserDetails.data[ 0 ].lastName : "",
+                        username: getuserDetails.data[ 0 ].username,
+                        roles: ( 'realm_access' in intro_token_response.data && 'roles' in intro_token_response.data.realm_access ) ? intro_token_response.data.realm_access.roles : [],
+                        realm: realm_name,
 
-                        let responseObject = {
+                      };
 
-                          id: getuserDetails.data[ 0 ].id,
-                          firstName: getuserDetails.data[ 0 ].firstName ? getuserDetails.data[ 0 ].firstName : "",
-                          lastName: getuserDetails.data[ 0 ].lastName ? getuserDetails.data[ 0 ].lastName : "",
-                          username: getuserDetails.data[ 0 ].username,
-                          permittedResources: {
-                            Resources: intrsopectionResponse.data.authorization.permissions,
-                          },
-                          roles: intrsopectionResponse.data.realm_access.roles,
-                          realm: realm_name,
+                      //Adding user custom attribute to our token object data.
+                      if ( getuserDetails.data[ 0 ].attributes ) {
 
-                        };
-
-                        //Adding user custom attribute to our token object data.
-                        if ( getuserDetails.data[ 0 ].attributes ) {
-
-                          responseObject.attributes = getuserDetails.data[ 0 ].attributes;
-                        } else {
-
-                          responseObject.attributes = {};
-                        }
-
-                        delete config.headers.Authorization;
-                        delete config.data;
-
-                        //Role to Remove from keycloak user during Update process.
-                        let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
-                        let administrativeRoles = responseObject.roles.filter( role => (
-                          !ignoreRoles.includes( role ) &&
-                          role.indexOf( "default-roles" ) == -1 ) );
-
-
-
-                        //Fetching Groups data for each user.
-                        try {
-
-                          if ( ( !administrativeRoles.includes( 'agent' ) && !administrativeRoles.includes( 'supervisor' ) ) ) {
-
-                            responseObject.userTeam = {};
-                            responseObject.supervisedTeams = [];
-
-                          } else {
-
-                            let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
-
-                            //Check for Permission Groups assignment and roles assignment against them
-                            const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
-
-                            if ( checkUserRoleAndPermissions.error ) {
-
-                              reject( {
-                                error_message: "Token Generation Error: Failed to generate a user access token.",
-                                error_detail: {
-                                  status: 403,
-                                  reason: checkUserRoleAndPermissions.message
-                                }
-                              } );
-                            }
-
-                            delete teamData.permissionGroups;
-
-                            responseObject.userTeam = teamData.userTeam;
-                            responseObject.supervisedTeams = teamData.supervisedTeams;
-                          }
-
-
-
-                          let finalObject = {
-
-                            token: userToken,
-                            refresh_token: refresh_token,
-                            keycloak_User: responseObject,
-
-                          };
-
-                          resolve( finalObject );
-
-                        } catch ( er ) {
-
-                          reject( er );
-                        }
-
+                        responseObject.attributes = getuserDetails.data[ 0 ].attributes;
                       } else {
 
-                        reject( {
-                          error_message: "User Details Fetch Error: Could not retrieve user information during login.",
-                          error_detail: {
-                            status: 404,
-                            reason: `User Not Found: The specified username does not exist: ${user_name}`
-                          }
-                        } );
-
+                        responseObject.attributes = {};
                       }
 
+                      delete config1.headers.Authorization;
+                      delete config1.data;
 
-                    } catch ( er ) {
+                      //Fetching Groups data for each user.
+                      try {
 
-                      error = await errorService.handleError( er );
+                        let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
+
+                        //Check for Permission Groups assignment and roles assignment against them
+                        const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
+
+                        if ( checkUserRoleAndPermissions.error ) {
+
+                          reject( {
+                            error_message: "Token Generation Error: Failed to generate a user access token.",
+                            error_detail: {
+                              status: 403,
+                              reason: checkUserRoleAndPermissions.message
+                            }
+                          } );
+                        }
+
+                        delete teamData.permissionGroups;
+
+                        responseObject.userTeam = teamData.userTeam;
+                        responseObject.supervisedTeams = teamData.supervisedTeams;
+
+                      } catch ( er ) {
+
+                        reject( er );
+                      }
+
+                    } else {
 
                       reject( {
                         error_message: "User Details Fetch Error: Could not retrieve user information during login.",
-                        error_detail: error
+                        error_detail: {
+                          status: 404,
+                          reason: `User Not Found: The specified username ${user_name} does not exist.`
+                        }
                       } );
+
                     }
+
+
+                  } catch ( er ) {
+
+                    error = await errorService.handleError( er );
+
+                    reject( {
+                      error_message: "Admin Token Generation Error: Failed to generate an admin access token.",
+                      error_detail: error
+                    } );
                   }
-
-                } catch ( er ) {
-
-                  error = await errorService.handleError( er );
-
-                  reject( {
-                    error_message: "Admin Token Generation Error: Failed to generate an admin access token.",
-                    error_detail: error
-                  } );
-
                 }
 
               } catch ( er ) {
@@ -714,25 +658,97 @@ class KeycloakService extends Keycloak {
                 error = await errorService.handleError( er );
 
                 reject( {
-                  error_message: "Introspect Token Generation Error: Failed to generate an introspection token.",
+                  error_message: "Admin Token Generation Error: Failed to generate an admin access token in user authentication process.",
                   error_detail: error
                 } );
 
               }
+            }
+
+
+            config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
+            config.data.audience = keycloakConfig.CLIENT_ID;
+            config.headers.Authorization = "Bearer " + token;
+
+            //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
+            try {
+
+              let rptResponse = await requestController.httpRequest( config, true );
+
+              if ( rptResponse.data.access_token ) {
+
+                token = rptResponse.data.access_token;
+                refresh_token = rptResponse.data.refresh_token;
+
+                let userToken = token;
+                config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                config.data.token = token;
+                URL = URL + "/introspect";
+                config.url = URL;
+
+                //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)
+                try {
+
+                  let intrsopectionResponse = await requestController.httpRequest( config, true );
+                  intrsopectionResponse.data.access_token = token;
+
+                  responseObject.permittedResources = {
+                    Resources: ( intrsopectionResponse.data.authorization.permissions.length > 0 ) ? intrsopectionResponse.data.authorization.permissions : []
+                  }
+
+                  //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N)
+
+                  let finalObject = {
+
+                    token: userToken,
+                    refresh_token: refresh_token,
+                    keycloak_User: responseObject,
+
+                  };
+
+                  resolve( finalObject );
+
+                } catch ( er ) {
+
+                  error = await errorService.handleError( er );
+
+                  reject( {
+                    error_message: "Introspect Token Generation Error: Failed to generate an introspection token in user authentication process.",
+                    error_detail: error
+                  } );
+
+                }
+
+              }
+
+            } catch ( er ) {
+
+              error = await errorService.handleError( er );
+
+              reject( {
+                error_message: "Rpt Token Fetch Error: Could not fetch the refresh token. Please ensure the user has the necessary roles, permissions, and groups" +
+                  ". e.g: agent user must be assigned agent role, agents_permission group & all required permissions are created" +
+                  ". every user must be assigned one team, if user is not part of any team then assign default team to User.",
+                error_detail: {
+                  "status": 403,
+                  "reason": "Missing role, team or, permissions to log in. Please check with your administrator."
+                }
+              } );
 
             }
+
+
 
           } catch ( er ) {
 
             error = await errorService.handleError( er );
 
             reject( {
-              error_message: "Rpt Token Fetch Error: Could not fetch the refresh token. Please ensure the user has the necessary roles, permissions, and groups.",
+              error_message: "Token Generation Error: Failed to generate a user access introspect token.",
               error_detail: error
             } );
 
           }
-
         }
 
       } catch ( er ) {
@@ -751,75 +767,126 @@ class KeycloakService extends Keycloak {
   // Function to check user roles and permissions
   checkUserRoleAndPermissions( teamData, responseObject ) {
 
-    const userRoles = responseObject.roles;
+    // Extract and clean up user roles
+    const userRoles = responseObject.roles.filter(
+      role => ![ 'default-roles-expertflow', 'offline_access', 'uma_authorization' ].includes( role )
+    );
+
+    const userTeam = teamData.userTeam || {};
     const permissionGroups = teamData.permissionGroups || [];
 
+    // Check role flags
     const isAgent = userRoles.includes( 'agent' );
     const isSupervisor = userRoles.includes( 'supervisor' );
 
-    const hasSeniorAgentsPermission = permissionGroups.includes( "senior_agents_permission" );
-    const hasAgentsPermission = permissionGroups.includes( "agents_permission" );
+    // Check permission flags
+    const hasSeniorAgentsPermission = permissionGroups.includes( 'senior_agents_permission' );
+    const hasAgentsPermission = permissionGroups.includes( 'agents_permission' );
 
-    // Check if permission groups are assigned but no corresponding roles
-    /* if ( permissionGroups.length > 0 && !isAgent && !isSupervisor ) {
-      if ( hasSeniorAgentsPermission ) {
+    // Check for basic requirements
+    const hasRoles = userRoles.length > 0;
+    const hasTeam = Object.keys( userTeam ).length > 0;
+    const hasPermissions = permissionGroups.length > 0;
+
+    // Basic validation checks
+    if ( !hasRoles && !hasPermissions && !hasTeam ) {
+      return {
+        error: true,
+        message: 'Missing role, team or, permissions to log in. Please check with your administrator.'
+      };
+    }
+
+    if ( !hasRoles && !hasPermissions ) {
+      return {
+        error: true,
+        message: 'Missing role or permissions to log in. Please check with your administrator.'
+      };
+    }
+
+    if ( !hasRoles && !hasTeam ) {
+      return {
+        error: true,
+        message: 'Missing team or role to log in. Please check with your administrator.'
+      };
+    }
+
+    if ( !hasRoles ) {
+      return {
+        error: true,
+        message: 'No roles are assigned to log in. Please check with your administrator.'
+      };
+    }
+
+    // Role-specific validation
+
+    // Case 1: User is both agent and supervisor
+    if ( isAgent && isSupervisor ) {
+      if ( !hasSeniorAgentsPermission ) {
         return {
           error: true,
-          message: "No role assigned against senior_agents_permission group. Please assign either agent or supervisor role."
-        };
-      } else if ( hasAgentsPermission ) {
-        return {
-          error: true,
-          message: "No role assigned against agents_permission group. Please assign agent role."
+          message: 'You do not have the required permissions to log in. Please check with your administrator.'
         };
       }
-    } */
+    }
 
-    // If user is both agent and supervisor
-    if ( isAgent && isSupervisor ) {
+    // Case 2: User is supervisor only
+    else if ( isSupervisor ) {
+      if ( !hasTeam && !hasPermissions ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasPermissions ) {
+        return {
+          error: true,
+          message: 'You do not have the required permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam && !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
 
       if ( !hasSeniorAgentsPermission ) {
-
         return {
           error: true,
-          message: "Permission Group Assignment: Please assign the senior_agents_permission group to users with both agent and supervisor roles."
+          message: 'You do not have the right permissions to log in. Please check with your administrator.'
         };
-
       }
-    }
 
-    // If user is supervisor
-    else if ( isSupervisor ) {
-
-      if ( permissionGroups.length === 0 ) {
-
+      if ( !hasTeam && hasSeniorAgentsPermission ) {
         return {
           error: true,
-          message: "Missing Permission Group: No permission group is assigned to the supervisor role. Please assign the senior_agents_permission group."
-        };
-
-      } else if ( !hasSeniorAgentsPermission ) {
-        return {
-          error: true,
-          message: "Incorrect Permission Group: Please assign the senior_agents_permission group instead of the agents_permission group."
+          message: 'You are not a part of any team. Please check with your administrator.'
         };
       }
     }
 
-    // If user is agent
+    // Case 3: User is agent only
     else if ( isAgent ) {
-
-      if ( permissionGroups.length === 0 ) {
-
+      if ( !hasTeam && !hasPermissions ) {
         return {
           error: true,
-          message: "Permission Group Assignment: Please assign the agents_permission group to normal agents and the senior_agents_permission group to senior agents."
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
         };
+      }
 
-      } else if ( !hasAgentsPermission && !hasSeniorAgentsPermission ) {
+      if ( !hasPermissions ) {
         return {
           error: true,
-          message: "Permission Group Requirement: Please assign either the agents_permission or senior_agents_permission group to users with the agent role."
+          message: 'You do not have the required permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam && ( hasAgentsPermission || hasSeniorAgentsPermission ) ) {
+        return {
+          error: true,
+          message: 'You are not a part of any team. Please check with your administrator.'
         };
       }
     }
@@ -833,7 +900,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token/introspect";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token/introspect";
 
       let config = {
 
@@ -892,7 +959,7 @@ class KeycloakService extends Keycloak {
 
       let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients?clientId=" + keycloakConfig[ "CLIENT_ID" ];
 
-      var config = {
+      let config = {
         method: "get",
         url: URL,
         headers: {
@@ -931,7 +998,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1010,7 +1077,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1137,7 +1204,7 @@ class KeycloakService extends Keycloak {
 
       let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients/" + clientId + "/authz/resource-server/policy?name=" + policyName + "&exact=true";
 
-      var config = {
+      let config = {
 
         method: "get",
         url: URL,
@@ -1181,9 +1248,9 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1267,7 +1334,7 @@ class KeycloakService extends Keycloak {
 
       delete policyObj.id;
 
-      var config = {
+      let config = {
 
         method: "put",
         url: URL,
@@ -1310,9 +1377,9 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1395,7 +1462,7 @@ class KeycloakService extends Keycloak {
 
       let token;
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1420,7 +1487,7 @@ class KeycloakService extends Keycloak {
         token = adminTokenResponse.data.access_token;
 
         // EVALUATION REQUEST
-        var data = JSON.stringify( {
+        let data = JSON.stringify( {
           resources: [ { _id: resource_name } ],
           clientId: keycloakConfig.CLIENT_DB_ID,
           userId: keycloak_user_id,
@@ -1474,7 +1541,7 @@ class KeycloakService extends Keycloak {
 
       let token;
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1539,10 +1606,10 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let team = { userTeam: {}, supervisedTeams: [] };
+      let team = { userTeam: {}, supervisedTeams: [], permissionGroups: [] };
       let error;
 
-      var config = {
+      let config = {
         method: "get",
         headers: {
           Accept: "application/json",
@@ -1636,7 +1703,7 @@ class KeycloakService extends Keycloak {
 
       let token;
       let message;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
 
 
@@ -1670,7 +1737,7 @@ class KeycloakService extends Keycloak {
 
         }
 
-        var config = {
+        let config = {
 
           method: "post",
           url: URL,
@@ -1821,9 +1888,9 @@ class KeycloakService extends Keycloak {
 
       let token;
       let groupsData = [];
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -3668,7 +3735,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let passwordUpdate = false;
-      var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false&exact=true"
+      let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false&exact=true"
 
       let config = {
         method: "get",
@@ -3724,7 +3791,7 @@ class KeycloakService extends Keycloak {
               let userId = userResponse.data[ 0 ].id;
 
               //API URL used to update the password.
-              var URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
+              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
 
               let data = {
                 "temporary": false,
@@ -3785,9 +3852,9 @@ class KeycloakService extends Keycloak {
   async generateAccessTokenFromRefreshToken( refreshToken ) {
     return new Promise( async ( resolve, reject ) => {
       let accessToken;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
         method: "post",
         url: URL,
         headers: {

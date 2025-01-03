@@ -1,7 +1,7 @@
 const parseXMLString = require( 'xml2js' ).parseString;
 const https = require( 'https' );
 
-var requestController = require( "../controller/requestController.js" );
+let requestController = require( "../controller/requestController.js" );
 
 class FinesseService {
 
@@ -14,7 +14,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/User/' + username;
+            let URL = finesseUrl + '/finesse/api/User/' + username;
             let userObject = {};
 
             let encodedCredentials = await this.maskCredentials( username, password );
@@ -108,7 +108,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/User/' + username;
+            let URL = finesseUrl + '/finesse/api/User/' + username;
             let userObject = {};
 
             let config = {
@@ -199,7 +199,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/Teams';
+            let URL = finesseUrl + '/finesse/api/Teams';
 
             let encodedCredentials = await this.maskCredentials( username, password );
 
@@ -247,7 +247,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/Users';
+            let URL = finesseUrl + '/finesse/api/Users';
 
             let encodedCredentials = await this.maskCredentials( username, password );
 
