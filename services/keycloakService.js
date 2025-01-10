@@ -237,11 +237,11 @@ class KeycloakService extends Keycloak {
 
                 if ( adminTokenResponse.data.access_token ) {
 
-                  token = adminTokenResponse.data.access_token;
+                  let admin_token = adminTokenResponse.data.access_token;
 
                   try {
 
-                    config1.headers.Authorization = "Bearer " + token;
+                    config1.headers.Authorization = "Bearer " + admin_token;
                     config1.method = "get";
                     config1.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
                     delete config1.data;
@@ -276,7 +276,7 @@ class KeycloakService extends Keycloak {
                       //Fetching Groups data for each user.
                       try {
 
-                        let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, responseObject.roles, token );
+                        let teamData = await this.getUserSupervisedGroups( responseObject.id, responseObject.username, responseObject.roles, admin_token );
 
                         //Check for Permission Groups assignment and roles assignment against them
                         const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
@@ -340,6 +340,25 @@ class KeycloakService extends Keycloak {
 
               }
             }
+
+            config = {
+
+              method: "post",
+              url: URL,
+              headers: {
+                Accept: "application/json",
+                "cache-control": "no-cache",
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              data: {
+                username: user_name,
+                password: user_password,
+                client_id: keycloakConfig.CLIENT_ID,
+                client_secret: keycloakConfig.credentials.secret,
+                grant_type: keycloakConfig.GRANT_TYPE,
+              },
+
+            };
 
 
             config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
