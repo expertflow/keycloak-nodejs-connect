@@ -84,7 +84,7 @@ class ErrorService {
 
                                 return {
                                     status: err.response.status,
-                                    reason: 'Invalid User Credentials: The provided user credentials are not valid. Please provide valid user credentials.',
+                                    reason: 'Invalid User Credentials: The provided credentials are not valid. Please enter valid user credentials.',
                                 };
                             default:
 
