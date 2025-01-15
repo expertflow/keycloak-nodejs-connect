@@ -426,7 +426,7 @@ class KeycloakService extends Keycloak {
                   ". every user must be assigned one team, if user is not part of any team then assign default team to User.",
                 error_detail: {
                   "status": 403,
-                  "reason": "Missing role, team or, permissions to log in. Please check with your administrator."
+                  "reason": "Missing role, team, or permissions to log in. Please check with your administrator."
                 }
               } );
 
