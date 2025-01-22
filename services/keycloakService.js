@@ -33,7 +33,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password = '', realm_name, is2FAEnabled = false, twoFAChannel = '', finesseUrl = '', userRoles = [], finesseToken = '' ) {
+  async authenticateUserViaKeycloak( user_name, user_password = '', realm_name, is2FAEnabled = false, twoFAChannel = '', finesseUrl = '', agentExtension = [], finesseToken = '' ) {
 
     let token = "";
 
@@ -122,7 +122,7 @@ class KeycloakService extends Keycloak {
     } else {
 
       // Finesse Auth, takes userRole in argument to create user along with role.
-      token = await this.authenticateFinesse( user_name, user_password, finesseUrl, userRoles, finesseToken );
+      token = await this.authenticateFinesse( user_name, user_password, finesseUrl, agentExtension, finesseToken );
 
       return token;
 
@@ -2528,7 +2528,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Authenticating Finesse User
-  async authenticateFinesse( username, password, finesseUrl, userRoles, finesseToken ) {
+  async authenticateFinesse( username, password, finesseUrl, agentExtension = [], finesseToken ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -2539,7 +2539,7 @@ class KeycloakService extends Keycloak {
         //Handle finesse error cases correctly. (for later)
         if ( finesseToken.length == 0 ) {
 
-          finesseLoginResponse = await finesseService.authenticateUserViaFinesse( username, password, finesseUrl );
+          finesseLoginResponse = await finesseService.authenticateUserViaFinesse( username, password, finesseUrl, keycloakConfig[ "FINESSE_USERNAME_ADMIN" ], keycloakConfig[ "FINESSE_PASSWORD_ADMIN" ] );
 
         } else {
 
@@ -2573,7 +2573,7 @@ class KeycloakService extends Keycloak {
 
               if ( !updateUserPromise ) {
 
-                updateUserPromise = this.updateUser( finesseLoginResponse.data, keycloakAdminToken, keycloakAuthToken, finesseLoginResponse.data.username, password )
+                updateUserPromise = this.updateUser( finesseLoginResponse.data, keycloakAdminToken, keycloakAuthToken, finesseLoginResponse.data.username, password, agentExtension )
                   .then( async ( updatedUser ) => {
 
                     //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
@@ -2628,7 +2628,7 @@ class KeycloakService extends Keycloak {
                   username,
                   password,
                   token,
-                  userRoles,
+                  agentExtension,
                 } );
 
                 if ( error ) {
@@ -2643,7 +2643,7 @@ class KeycloakService extends Keycloak {
               try {
 
                 //Creating Finesse User inside keycloak.
-                let userCreated = await this.createUser( finesseLoginResponse.data, keycloakAdminToken.access_token );
+                let userCreated = await this.createUser( finesseLoginResponse.data, keycloakAdminToken.access_token, agentExtension );
 
                 if ( userCreated.status == 201 ) {
 
@@ -2684,7 +2684,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Create a Finesse user during login.
-  async createUser( userObject, token ) {
+  async createUser( userObject, token, agentExtension ) {
 
     let assignRole = [];
     let assignGroups = [];
@@ -2711,7 +2711,8 @@ class KeycloakService extends Keycloak {
         ],
         attributes: {
           "user_name": `${userObject.loginName}`,
-          "extension": `${userObject.extension}`
+          "extension": `${userObject.extension}`,
+          "agentExtension": `${agentExtension}`
         },
         groups: assignGroups
       };
@@ -3082,7 +3083,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Check for changes in Finesse User on Each login.
-  async updateUser( finObj, keycloakAdminToken, keycloakAuthToken, username, password ) {
+  async updateUser( finObj, keycloakAdminToken, keycloakAuthToken, username, password, agentExtension ) {
     /* 
         Check for changes in user role, if user is removed from supervisor role then delete all its Permissions/Policies.
         If supervisor is added to user role then check for the groups it is supervising and create its permissions.
@@ -3160,6 +3161,7 @@ class KeycloakService extends Keycloak {
           || finObj.lastName != keyObj.lastName
           || ( userAttributes.user_name && finObj.loginName !== userAttributes.user_name[ 0 ] )
           || ( userAttributes.extension && finObj.extension !== userAttributes.extension[ 0 ] )
+          || ( userAttributes.agentExtension && agentExtension !== userAttributes.agentExtension[ 0 ] )
           || ( !userAttributes.user_name )
         ) {
 
@@ -3169,7 +3171,8 @@ class KeycloakService extends Keycloak {
             lastName: finObj.lastName,
             attributes: {
               "user_name": `${finObj.loginName}`,
-              "extension": `${finObj.extension}`
+              "extension": `${finObj.extension}`,
+              "agentExtension": `${agentExtension}`
             }
           };
         }
@@ -3943,7 +3946,7 @@ function validateUser( userData ) {
     username: Joi.string().min( 1 ).max( 255 ).required(),
     password: Joi.string().min( 1 ).max( 255 ).required(),
     token: Joi.string().required(),
-    userRoles: Joi.array().items( Joi.string() ).allow( null ),
+    agentExtension: Joi.string().allow( null ),
   } );
 
   return schema.validate( userData );
