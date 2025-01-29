@@ -1,7 +1,7 @@
 const parseXMLString = require( 'xml2js' ).parseString;
 const https = require( 'https' );
 
-var requestController = require( "../controller/requestController.js" );
+let requestController = require( "../controller/requestController.js" );
 
 class FinesseService {
 
@@ -14,7 +14,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/User/' + username;
+            let URL = finesseUrl + '/finesse/api/User/' + username;
             let userObject = {};
 
             let encodedCredentials = await this.maskCredentials( username, password );
@@ -80,17 +80,17 @@ class FinesseService {
                 if ( er.code == "ENOTFOUND" ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse",
+                        error_message: "Finesse Authentication Error: An error occurred while authenticating the user via finesse.",
                         error_detail: {
                             status: 408,
-                            reason: `finesse server not accessible against URL: ${finesseUrl}`
+                            reason: `Finesse server not accessible against URL: ${finesseUrl}`
                         }
                     } )
 
                 } else if ( er.response ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse",
+                        error_message: "Finesse Authentication Error: An error occurred while authenticating the user via finesse.",
                         error_detail: {
                             status: er.response.status,
                             reason: er.response.statusText
@@ -108,7 +108,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/User/' + username;
+            let URL = finesseUrl + '/finesse/api/User/' + username;
             let userObject = {};
 
             let config = {
@@ -172,17 +172,17 @@ class FinesseService {
                 if ( er.code == "ENOTFOUND" ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse SSO",
+                        error_message: "Finesse SSO Authentication Error: An error occurred while authenticating the user using finesse single sign-on.",
                         error_detail: {
                             status: 408,
-                            reason: `finesse server not accessible against URL: ${finesseUrl}`
+                            reason: `Finesse server not accessible against url: ${finesseUrl}`
                         }
                     } )
 
                 } else if ( er.response ) {
 
                     reject( {
-                        error_message: "Error Occured While Authenticating User Via Finesse SSO",
+                        error_message: "Finesse SSO Authentication Error: An error occurred while authenticating the user using finesse single sign-on.",
                         error_detail: {
                             status: er.response.status,
                             reason: er.response.statusText
@@ -199,7 +199,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/Teams';
+            let URL = finesseUrl + '/finesse/api/Teams';
 
             let encodedCredentials = await this.maskCredentials( username, password );
 
@@ -247,7 +247,7 @@ class FinesseService {
 
         return new Promise( async ( resolve, reject ) => {
 
-            var URL = finesseUrl + '/finesse/api/Users';
+            let URL = finesseUrl + '/finesse/api/Users';
 
             let encodedCredentials = await this.maskCredentials( username, password );
 

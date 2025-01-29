@@ -1,22 +1,27 @@
-var session = require( "express-session" );
-var Keycloak = require( "keycloak-connect" );
+let session = require( "express-session" );
+let Keycloak = require( "keycloak-connect" );
 const Joi = require( "joi" );
+const qrcode = require( "qrcode" );
+const speakeasy = require( 'speakeasy' )
 const parseXMLString = require( "xml2js" ).parseString;
-
-var requestController = require( "../controller/requestController.js" );
-var memory = new session.MemoryStore();
 
 const forge = require( 'node-forge' );
 const fs = require( 'fs' );
 const os = require( 'os' );
 const path = require( 'path' );
 
-var keycloakConfig = null;
+
+let requestController = require( "../controller/requestController.js" );
+let memory = new session.MemoryStore();
+
+let keycloakConfig = null;
 let realmRoles = [];
 
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
+const twilio = require( 'twilio' )
+let twilioClient = null       // will be initialized in constructor using config file
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
@@ -27,23 +32,103 @@ class KeycloakService extends Keycloak {
     keycloakConfig = { ...config };
     super( { store: memory }, keycloakConfig ); //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
     // this.keycloakConfig = config;
+    if ( keycloakConfig.TWILIO_SID && keycloakConfig.TWILIO_AUTH_TOKEN ) {
+      twilioClient = twilio( keycloakConfig.TWILIO_SID, keycloakConfig.TWILIO_AUTH_TOKEN )
+    }
   }
 
   //Based on the attributes it either authenticate keycloak user or finesse user.
-  async authenticateUserViaKeycloak( user_name, user_password, realm_name, finesseUrl, userRoles, finesseToken, idpType = 'keycloak', externalIdpParams = {} ) {
+  async authenticateUserViaKeycloak( user_name, user_password = '', realm_name, is2FAEnabled = false, twoFAChannel = '', finesseUrl = '', userRoles = [], finesseToken = '' ) {
 
     let token = "";
 
     // If finesseUrl is empty it means normal keycloak auth is required.
-    if ( finesseUrl == "" ) {
-
+    if ( !finesseUrl || finesseUrl == "" ) {
       token = await this.getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, 'CX' );
+      let attributesFromToken = token.keycloak_User.attributes
+
+      if ( is2FAEnabled ) {     // if 2FA is enabled then running the 2FA flow
+        if ( !twoFAChannel || twoFAChannel == '' || ( twoFAChannel !== 'app' && twoFAChannel !== 'sms' ) ) {
+          return Promise.reject( { status: 400, error_message: 'twoFAChannel parameter is empty or invalid' } )
+        }
+
+        // token for only sending info related to 2FA
+        let tempToken = {
+          username: user_name
+        };
+
+        // checking if user attributes in keycloak exist or not to confirm 2FA registration
+        if ( !attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false' ) {
+
+          // appending extra information regarding 2FA in response object
+          tempToken.is2FARegistered = false
+          tempToken.twoFAChannel = twoFAChannel
+          tempToken.message = "2FA registration required"
+
+          // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
+          if ( twoFAChannel == 'app' ) {
+            // QR Code and Secret Code generation based on username
+            const qrSetup = await this.getQRCode( user_name )
+            if ( qrSetup ) {
+              tempToken.otpSecret = qrSetup.secret
+              tempToken.qrImage = qrSetup.image
+            }
+            else return Promise.reject( { error: 404, error_message: 'Error occurred while generating QR code.' } )
+
+            // getting admin access token to update the user attributes
+            const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+            const adminToken = adminData.access_token
+
+            //updating user attributes for 2FA
+            let newAttributes = {}
+            if ( attributesFromToken ) newAttributes = attributesFromToken
+            newAttributes.tempOTPSecret = qrSetup.secret
+            newAttributes.twoFAChannel = 'app'
+            newAttributes.is2FARegistered = false
+
+            // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
+            await this.updateUserAttributes( adminToken, token.keycloak_User.id, newAttributes )
+          }
+        }
+        else if ( attributesFromToken.is2FARegistered[ 0 ] == 'true' ) {     // if user has already registered for 2FA
+          tempToken.is2FARegistered = true
+          tempToken.twoFAChannel = attributesFromToken.twoFAChannel[ 0 ]
+          tempToken.message = "OTP required"
+
+          if ( attributesFromToken.twoFAChannel[ 0 ] == 'sms' ) {
+            if ( !attributesFromToken.phoneNumber ) {
+              return Promise.reject( {
+                error: 404,
+                error_message: 'Error occurred while fetching phoneNumber from user attributes.'
+              } )
+            }
+            await this.sendOTPviaSMS( attributesFromToken.phoneNumber[ 0 ] )
+
+            tempToken.phoneNumber = attributesFromToken.phoneNumber[ 0 ]
+          }
+
+          // deleting otpSecret from response
+          if ( token.keycloak_User.attributes.otpSecret )
+            delete token.keycloak_User.attributes.otpSecret
+        }
+        else {
+          return Promise.reject( {
+            error: 404,
+            error_message: 'Error occurred while verifying user registration for 2FA.'
+          } )
+        }
+
+        return tempToken;
+
+      }
+
       return token;
 
     } else {
 
       // Finesse Auth, takes userRole in argument to create user along with role.
       token = await this.authenticateFinesse( user_name, user_password, finesseUrl, userRoles, finesseToken );
+
       return token;
 
     }
@@ -53,7 +138,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -82,7 +167,7 @@ class KeycloakService extends Keycloak {
         let error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User Access Token",
+          error_message: "Token Generation Error: Failed to generate a user access token.",
           error_detail: error
         } );
 
@@ -94,7 +179,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -125,7 +210,7 @@ class KeycloakService extends Keycloak {
         let error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User RPT Token",
+          error_message: "Rpt Token Generation Error: Failed to generate a refresh token.",
           error_detail: error
         } );
 
@@ -137,7 +222,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
 
       let config = {
         method: "post",
@@ -165,7 +250,7 @@ class KeycloakService extends Keycloak {
         let error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User Introspect Token",
+          error_message: "Introspect Token Generation Error: Failed to generate an introspection token.",
           error_detail: error
         } );
 
@@ -173,7 +258,250 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  // this function requires an Admin user in keycloak.json having realm-management roles
+  // function for getting user details (and extracting attributes)
+  async getUserDetails( adminToken, username ) {
+    let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
+    let config = {
+      method: "get",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Bearer ${adminToken}`
+      }
+    };
+
+    try {
+
+      let userDetails = await requestController.httpRequest( config, true );
+
+      if ( userDetails.data[ 0 ] ) {
+        return userDetails.data[ 0 ];    // extracting user details from response object
+      }
+      else throw false;
+
+    } catch ( error ) {
+      let err = await errorService.handleError( error )
+      return Promise.reject( { error_message: 'Error occurred while fetching user details.', error_detail: err } );
+    }
+  }
+
+  // function for generating QR code and Secret code based on username
+  async getQRCode( username ) {
+    const secret = speakeasy.generateSecret( { name: username, symbols: false } )
+    let image;
+    try {
+      image = await qrcode.toDataURL( secret.otpauth_url + "&issuer=EFCX" )
+    } catch ( error ) {
+      return false;
+    }
+    return { secret: secret.base32, image }
+  }
+
+  // function for updating user attributes in KeyCloak for 2FA registration
+  async updateUserAttributes( adminToken, userId, attributesToUpdate ) {
+    let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId;
+    let config = {
+      method: "put",
+      url: URL,
+      headers: {
+        Accept: "application/json",
+        "cache-control": "no-cache",
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`
+      },
+      data: {
+        attributes: attributesToUpdate
+      }
+    };
+
+    try {
+      await requestController.httpRequest( config, false );
+    } catch ( error ) {
+      let err = await errorService.handleError( error )
+      return Promise.reject( { error_message: 'Error occurred while updating user attributes.', error_detail: err } );
+    }
+  }
+
+  // function for validating phone number
+  isValidPhoneNumber( phoneNumber ) {
+    return /^\d{7,15}$/.test( phoneNumber );
+  }
+
+  // function for binding/registering phone number with user in Keycloak attributes - (callable from frontend)
+  async registerPhoneNumber( username, phoneNumber ) {
+    if ( !this.isValidPhoneNumber( phoneNumber ) ) {
+      return Promise.reject( { error: 400, error_message: 'Invalid phone number' } );
+    }
+
+    let userObjectToBeReturned = { username: username }
+
+    const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+    const adminToken = adminData.access_token
+
+    let userObject = await this.getUserDetails( adminToken, username )
+    if ( !userObject.attributes ) {
+      userObject.attributes = {}
+    }
+
+    // getting user attributes from the object and saving phoneNumber & additional information in KC
+    if ( userObject.attributes ) {
+      let userObjectAttributes = userObject.attributes
+      let newAttributes = {}
+
+      //checking if some attributes already exist
+      if ( Object.keys( userObjectAttributes ).length > 0 ) {
+        for ( let key in userObjectAttributes ) {
+          newAttributes[ key ] = userObjectAttributes[ key ][ 0 ]
+        }
+      }
+      newAttributes.is2FARegistered = false
+      newAttributes.twoFAChannel = 'sms'
+      newAttributes.phoneNumber = '+' + phoneNumber
+
+      // saving phoneNumber & updating user attributes
+      try {
+        await this.updateUserAttributes( adminToken, userObject.id, newAttributes )
+        await this.sendOTPviaSMS( '+' + phoneNumber )
+
+      } catch ( error ) {
+        let err = await errorService.handleError( error )
+        return Promise.reject( {
+          error_message: 'Error occurred while registering phone number.',
+          error_detail: err
+        } );
+      }
+    }
+    else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
+
+    // updating userObject that is returned to frontend
+
+    userObjectToBeReturned.is2FARegistered = false
+    userObjectToBeReturned.twoFAChannel = 'sms'
+    userObjectToBeReturned.phoneNumber = '+' + phoneNumber
+    userObjectToBeReturned.message = 'OTP required'
+
+    return userObjectToBeReturned
+  }
+
+  // function for generating OTP from Twilio and sending via SMS - (callable from frontend)
+  async sendOTPviaSMS( phoneNumber ) {
+    if ( phoneNumber.startsWith( '+' ) ) {
+      phoneNumber = phoneNumber.slice( 1 ); // remove '+'
+
+      if ( !this.isValidPhoneNumber( phoneNumber ) ) {
+        return Promise.reject( { error: 400, error_message: 'Invalid phone number' } );
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+    else {
+      if ( !this.isValidPhoneNumber( phoneNumber ) ) {
+        return Promise.reject( { error: 400, error_message: 'Invalid phone number' } );
+      }
+
+      phoneNumber = '+' + phoneNumber;
+    }
+
+    try {
+      await twilioClient.verify.v2.services( keycloakConfig.TWILIO_VERIFY_SID )
+        .verifications
+        .create( { to: phoneNumber, channel: 'sms' } );
+    } catch ( error ) {
+      return Promise.reject( {
+        error: 400,
+        error_message: 'Error occured while sending OTP via SMS. This may be because of some issue with Twilio Service.'
+      } )
+    }
+
+    return Promise.resolve( 'OTP sent successfully.' )
+  }
+
+  // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
+  async validateOTP( username, password, realm, otpToValidate ) {
+    const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+    const adminToken = adminData.access_token
+
+    // getting user details for fetching attributes and otpSecret or OTP validation
+    let userDetails = await this.getUserDetails( adminToken, username )
+    if ( userDetails.attributes ) {
+      let userAttributes = userDetails.attributes
+
+      if ( !userAttributes.is2FARegistered ) {
+        return Promise.reject( {
+          error: 404,
+          error_message: 'Error occurred while verifying the 2FA registration. This may be because the user has not registered for 2FA.'
+        } )
+      }
+
+      // running OTP validation flow for authenticator app
+      if ( userAttributes.twoFAChannel[ 0 ] == 'app' ) {
+        let secret = userAttributes.otpSecret ? userAttributes.otpSecret[ 0 ] : userAttributes.tempOTPSecret[ 0 ]
+
+        const verified = speakeasy.totp.verify( { secret: secret, encoding: 'base32', token: otpToValidate } );
+        if ( !verified ) return Promise.reject( { error: 401, error_message: 'Invalid OTP.' } );
+
+        // updating user attributes if he is registering for 2FA using G-Auth OTP
+        if ( userAttributes.is2FARegistered[ 0 ] == 'false' ) {
+          let newAttributes = {}
+          for ( let key in userAttributes ) {
+            newAttributes[ key ] = userAttributes[ key ][ 0 ]
+          }
+          if ( newAttributes.tempOTPSecret ) {
+            newAttributes.otpSecret = newAttributes.tempOTPSecret
+            delete newAttributes.tempOTPSecret
+          }
+          newAttributes.is2FARegistered = true
+
+          this.updateUserAttributes( adminToken, userDetails.id, newAttributes )
+        }
+      }
+
+      // running OTP validation flow for SMS
+      else if ( userAttributes.twoFAChannel[ 0 ] == 'sms' ) {
+        try {
+          let verificationStatus = await twilioClient.verify.v2.services( keycloakConfig.TWILIO_VERIFY_SID )
+            .verificationChecks
+            .create( { to: userAttributes.phoneNumber[ 0 ], code: otpToValidate } );
+
+          if ( verificationStatus.status !== 'approved' )
+            throw false
+
+          // updating user attributes if he is registering for 2FA using SMS OTP
+          if ( userAttributes.is2FARegistered[ 0 ] == 'false' ) {
+            let newAttributes = {}
+            for ( let key in userAttributes ) {
+              newAttributes[ key ] = userAttributes[ key ][ 0 ]
+            }
+
+            newAttributes.is2FARegistered = true
+            this.updateUserAttributes( adminToken, userDetails.id, newAttributes )
+          }
+
+        } catch ( error ) {
+          return Promise.reject( {
+            error: 404,
+            error_message: `Error occurred while validating OTP. This may be because of invalid OTP or some issue with Twilio Service.`
+          } )
+        }
+      }
+
+    }
+    else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
+
+    let userToken = await this.authenticateUserViaKeycloak( username, password, realm )
+
+    // deleting otpSecret from response
+    if ( userToken.keycloak_User.attributes.otpSecret )
+      delete userToken.keycloak_User.attributes.otpSecret
+
+    if ( userToken.keycloak_User.attributes.tempOTPSecret )
+      delete userToken.keycloak_User.attributes.tempOTPSecret
+
+    return userToken
+  }
+
   async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
 
     return new Promise( async ( resolve, reject ) => {
@@ -181,8 +509,9 @@ class KeycloakService extends Keycloak {
       let token;
       let refresh_token;
       let error;
+      let responseObject;
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
       //keycloakConfig["auth-server-url"] +'realms
       let config = {
@@ -212,189 +541,121 @@ class KeycloakService extends Keycloak {
         if ( tokenResponse.data.access_token ) {
 
           token = tokenResponse.data.access_token;
-          config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
-          config.data.audience = keycloakConfig.CLIENT_ID;
-          config.headers.Authorization = "Bearer " + token;
 
-          //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
+          //To fetch introspect token to handle errors.
+          let config_introspect = { ...config };
+          config_introspect.data.token = token;
+          delete config_introspect.data.username;
+          delete config_introspect.data.password;
+
+          config_introspect.url = URL + "/introspect";
+
           try {
 
-            var rptResponse = await requestController.httpRequest( config, true );
+            let intro_token_response = await requestController.httpRequest( config_introspect, true );
 
-            if ( rptResponse.data.access_token ) {
+            if ( Object.keys( intro_token_response.data ).length > 0 ) {
 
-              token = rptResponse.data.access_token;
-              refresh_token = rptResponse.data.refresh_token;
-
-              var userToken = token;
-              config.data.grant_type = keycloakConfig.GRANT_TYPE;
-              config.data.token = token;
-              URL = URL + "/introspect";
-              config.url = URL;
-
-              //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)
               try {
 
-                let intrsopectionResponse = await requestController.httpRequest( config, true );
-                intrsopectionResponse.data.access_token = token;
+                let config1 = { ...config };
+                config1.data.username = keycloakConfig.USERNAME_ADMIN;
+                config1.data.password = keycloakConfig.PASSWORD_ADMIN;
+                delete config1.data.token;
 
-                //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N)
-                try {
+                config1.url = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
-                  config.data.username = keycloakConfig.USERNAME_ADMIN;
-                  config.data.password = keycloakConfig.PASSWORD_ADMIN;
-                  config.url = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
+                let adminTokenResponse = await requestController.httpRequest( config1, true );
 
-                  delete config.data.audience;
-                  delete config.data.token;
-                  delete config.headers.Authorization;
+                if ( adminTokenResponse.data.access_token ) {
 
-                  let adminTokenResponse = await requestController.httpRequest( config, true );
+                  let admin_token = adminTokenResponse.data.access_token;
 
-                  if ( adminTokenResponse.data.access_token ) {
+                  try {
 
-                    token = adminTokenResponse.data.access_token;
+                    config1.headers.Authorization = "Bearer " + admin_token;
+                    config1.method = "get";
+                    config1.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
+                    delete config1.data;
 
-                    try {
+                    let getuserDetails = await requestController.httpRequest( config1, true );
 
-                      config.headers.Authorization = "Bearer " + token;
-                      config.method = "get";
-                      config.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name;
-                      delete config.data;
+                    if ( getuserDetails.data.length !== 0 ) {
 
-                      let getuserDetails = await requestController.httpRequest( config, true );
+                      responseObject = {
 
-                      if ( getuserDetails.data.length !== 0 ) {
+                        id: getuserDetails.data[ 0 ].id,
+                        firstName: getuserDetails.data[ 0 ].firstName ? getuserDetails.data[ 0 ].firstName : "",
+                        lastName: getuserDetails.data[ 0 ].lastName ? getuserDetails.data[ 0 ].lastName : "",
+                        username: getuserDetails.data[ 0 ].username,
+                        roles: ( 'realm_access' in intro_token_response.data && 'roles' in intro_token_response.data.realm_access ) ? intro_token_response.data.realm_access.roles : [],
+                        realm: realm_name,
 
-                        let responseObject = {
+                      };
 
-                          id: getuserDetails.data[ 0 ].id,
-                          firstName: getuserDetails.data[ 0 ].firstName ? getuserDetails.data[ 0 ].firstName : "",
-                          lastName: getuserDetails.data[ 0 ].lastName ? getuserDetails.data[ 0 ].lastName : "",
-                          username: getuserDetails.data[ 0 ].username,
-                          permittedResources: {
-                            Resources: intrsopectionResponse.data.authorization.permissions,
-                          },
-                          roles: intrsopectionResponse.data.realm_access.roles,
-                          realm: realm_name,
+                      //Adding user custom attribute to our token object data.
+                      if ( getuserDetails.data[ 0 ].attributes ) {
 
-                        };
-
-                        //Adding user custom attribute to our token object data.
-                        if ( getuserDetails.data[ 0 ].attributes ) {
-
-                          responseObject.attributes = getuserDetails.data[ 0 ].attributes;
-                        } else {
-
-                          responseObject.attributes = {};
-                        }
-
-                        delete config.headers.Authorization;
-                        delete config.data;
-
-                        //Role to Remove from keycloak user during Update process.
-                        let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
-                        let administrativeRoles = responseObject.roles.filter( role => (
-                          !ignoreRoles.includes( role ) &&
-                          role.indexOf( "default-roles" ) == -1 ) );
-
-
-
-                        //Fetching Groups data for each user.
-                        /* try { */
-
-                        /* if ( ( !administrativeRoles.includes( 'agent' ) && !administrativeRoles.includes( 'supervisor' ) ) ) {
-
-                          responseObject.userTeam = {};
-                          responseObject.supervisedTeams = [];
-
-                        } else {
-
-                          let teamData = await this.getUserSupervisedGroups( responseObject.id, token, type );
-
-                          //Getting role against permission group
-                          let isRole = ( teamData.permissionGroups ) ? ( ( teamData.permissionGroups.includes( "agents_permission" ) &&
-                            teamData.permissionGroups.includes( "senior_agents_permission" ) ? [ 'agent', 'supervisor' ] : [ 'agent' ] ) ) : undefined;
-
-                          let hasRole;
-
-                          if ( isRole ) {
-                            hasRole = isRole.some( requiredRole => responseObject.roles.includes( requiredRole ) );
-                          }
-
-
-                          //checking if required roles are assigned to user or not.
-                          if ( isRole && !hasRole ) {
-
-                            reject( {
-                              error_message: "Error Occured While Generating User Access Token",
-                              error_detail: {
-                                status: 403,
-                                reason: ( isRole.length > 1 ) ?
-                                  `Assign Either of ${isRole} role, if User is Senior Agent then Assign agent role else if user is Supervisor then assign supervisor role` :
-                                  `${isRole} Role has not been assigned, Please assign ${isRole} Role to given User.`
-                              }
-                            } );
-                          }
-
-
-                          delete teamData.permissionGroups;
-
-                          responseObject.userTeam = teamData.userTeam;
-                          responseObject.supervisedTeams = teamData.supervisedTeams;
-                        } */
-
-                        responseObject.userTeam = {};
-                        responseObject.supervisedTeams = [];
-
-                        let finalObject = {
-
-                          token: userToken,
-                          refresh_token: refresh_token,
-                          keycloak_User: responseObject,
-
-                        };
-
-                        resolve( finalObject );
-
-                        /* } catch ( er ) {
-
-                          reject( er );
-                        } */
-
+                        responseObject.attributes = getuserDetails.data[ 0 ].attributes;
                       } else {
 
-                        reject( {
-                          error_message: "Error Occured While Fetching User Details During Login Process",
-                          error_detail: {
-                            status: 404,
-                            reason: `No User exists against provided Username: ${user_name}`
-                          }
-                        } );
-
+                        responseObject.attributes = {};
                       }
 
+                      delete config1.headers.Authorization;
+                      delete config1.data;
 
-                    } catch ( er ) {
+                      //Fetching Groups data for each user.
+                      try {
 
-                      error = await errorService.handleError( er );
+                        let teamData = await this.getUserSupervisedGroups( responseObject.id, admin_token, type );
+
+                        //Check for Permission Groups assignment and roles assignment against them
+                        const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
+
+                        if ( checkUserRoleAndPermissions.error ) {
+
+                          reject( {
+                            error_message: "Token Generation Error: Failed to generate a user access token.",
+                            error_detail: {
+                              status: 403,
+                              reason: checkUserRoleAndPermissions.message
+                            }
+                          } );
+                        }
+
+                        delete teamData.permissionGroups;
+
+                        responseObject.userTeam = teamData.userTeam;
+                        responseObject.supervisedTeams = teamData.supervisedTeams;
+
+                      } catch ( er ) {
+
+                        reject( er );
+                      }
+
+                    } else {
 
                       reject( {
-                        error_message: "Error Occured While Fetching User Details During Login Process",
-                        error_detail: error
+                        error_message: "User Details Fetch Error: Could not retrieve user information during login.",
+                        error_detail: {
+                          status: 404,
+                          reason: `User Not Found: The specified username ${user_name} does not exist.`
+                        }
                       } );
+
                     }
+
+
+                  } catch ( er ) {
+
+                    error = await errorService.handleError( er );
+
+                    reject( {
+                      error_message: "Admin Token Generation Error: Failed to generate an admin access token.",
+                      error_detail: error
+                    } );
                   }
-
-                } catch ( er ) {
-
-                  error = await errorService.handleError( er );
-
-                  reject( {
-                    error_message: "Error Occured While Generating Admin Access Token required for User Authentication Flow",
-                    error_detail: error
-                  } );
-
                 }
 
               } catch ( er ) {
@@ -402,27 +663,114 @@ class KeycloakService extends Keycloak {
                 error = await errorService.handleError( er );
 
                 reject( {
-                  error_message: "Error Occured While Generating Introspect Token",
+                  error_message: "Admin Token Generation Error: Failed to generate an admin access token in user authentication process.",
                   error_detail: error
                 } );
 
               }
+            }
+
+            config = {
+
+              method: "post",
+              url: URL,
+              headers: {
+                Accept: "application/json",
+                "cache-control": "no-cache",
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              data: {
+                username: user_name,
+                password: user_password,
+                client_id: keycloakConfig.CLIENT_ID,
+                client_secret: keycloakConfig.credentials.secret,
+                grant_type: keycloakConfig.GRANT_TYPE,
+              },
+
+            };
+
+            config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
+            config.data.audience = keycloakConfig.CLIENT_ID;
+            config.headers.Authorization = "Bearer " + token;
+
+            //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
+            try {
+
+              let rptResponse = await requestController.httpRequest( config, true );
+
+              if ( rptResponse.data.access_token ) {
+                token = rptResponse.data.access_token;
+                refresh_token = rptResponse.data.refresh_token;
+
+                let userToken = token;
+                config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                config.data.token = token;
+                URL = URL + "/introspect";
+                config.url = URL;
+
+                //  T.O.K.E.N   R.E.Q.U.E.S.T   # 3   (A.C.C.E.S.S   T.O.K.E.N   I.N.T.R.O.S.P.E.C.T.I.O.N)
+                try {
+
+                  let intrsopectionResponse = await requestController.httpRequest( config, true );
+                  intrsopectionResponse.data.access_token = token;
+
+                  responseObject.permittedResources = {
+                    Resources: ( intrsopectionResponse.data.authorization.permissions.length > 0 ) ? intrsopectionResponse.data.authorization.permissions : []
+                  }
+
+                  //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N)
+
+                  let finalObject = {
+
+                    token: userToken,
+                    refresh_token: refresh_token,
+                    keycloak_User: responseObject,
+
+                  };
+
+                  resolve( finalObject );
+
+                } catch ( er ) {
+
+                  error = await errorService.handleError( er );
+
+                  reject( {
+                    error_message: "Introspect Token Generation Error: Failed to generate an introspection token in user authentication process.",
+                    error_detail: error
+                  } );
+
+                }
+
+              }
+
+            } catch ( er ) {
+
+              error = await errorService.handleError( er );
+
+              reject( {
+                error_message: "Rpt Token Fetch Error: Could not fetch the refresh token. Please ensure the user has the necessary roles, permissions, and groups" +
+                  ". e.g: agent user must be assigned agent role, agents_permission group & all required permissions are created" +
+                  ". every user must be assigned one team, if user is not part of any team then assign default team to User.",
+                error_detail: {
+                  "status": 403,
+                  "reason": "Missing role, team, or permissions to log in. Please check with your administrator."
+                }
+              } );
 
             }
+
+
 
           } catch ( er ) {
 
             error = await errorService.handleError( er );
 
             reject( {
-              error_message: "Error while fetching RPT token, Please make sure all required Roles,Permissions & " +
-                "Groups are assigned to User. e.g: Agent user must be assigned agent role, agents_permission group & all required permissions are created" +
-                ". Every user must be assigned one team, if user is not part of any Team then assign default team to User",
+              error_message: "Token Generation Error: Failed to generate a user access introspect token.",
               error_detail: error
             } );
 
           }
-
         }
 
       } catch ( er ) {
@@ -430,7 +778,7 @@ class KeycloakService extends Keycloak {
         error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating User Access Token",
+          error_message: "Token Generation Error: Failed to generate a user access token.",
           error_detail: error
         } );
 
@@ -438,11 +786,158 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+  // Function to check user roles and permissions
+  checkUserRoleAndPermissions( teamData, responseObject ) {
+
+    // Extract and clean up user roles
+    const userRoles = responseObject.roles.filter(
+      role => ![ 'default-roles-expertflow', 'offline_access', 'uma_authorization' ].includes( role )
+    );
+
+    const userTeam = teamData.userTeam || {};
+    const permissionGroups = teamData.permissionGroups || [];
+
+    // Check role flags
+    const isAgent = userRoles.includes( 'agent' );
+    const isSupervisor = userRoles.includes( 'supervisor' );
+
+    // Check permission flags
+    const hasSeniorAgentsPermission = permissionGroups.includes( 'senior_agents_permission' );
+    const hasAgentsPermission = permissionGroups.includes( 'agents_permission' );
+
+    // Check for basic requirements
+    const hasRoles = userRoles.length > 0;
+    const hasTeam = Object.keys( userTeam ).length > 0;
+    const hasPermissions = permissionGroups.length > 0;
+
+    // Basic validation checks
+    if ( !hasRoles && !hasPermissions && !hasTeam ) {
+      return {
+        error: true,
+        message: 'Missing role, team or, permissions to log in. Please check with your administrator.'
+      };
+    }
+
+    if ( !hasRoles && !hasPermissions ) {
+      return {
+        error: true,
+        message: 'Missing role or permissions to log in. Please check with your administrator.'
+      };
+    }
+
+    if ( !hasRoles && !hasTeam ) {
+      return {
+        error: true,
+        message: 'Missing team or role to log in. Please check with your administrator.'
+      };
+    }
+
+    if ( !hasRoles ) {
+      return {
+        error: true,
+        message: 'No roles are assigned to log in. Please check with your administrator.'
+      };
+    }
+
+    // Role-specific validation
+
+    // Case 1: User is both agent and supervisor
+    if ( isAgent && isSupervisor ) {
+
+      if ( !hasTeam && !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'You do not have the required permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam ) {
+        return {
+          error: true,
+          message: 'You are not a part of any team. Please check with your administrator.'
+        };
+      }
+    }
+
+    // Case 2: User is supervisor only
+    else if ( isSupervisor ) {
+      if ( !hasTeam && !hasPermissions ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasPermissions ) {
+        return {
+          error: true,
+          message: 'You do not have the required permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam && !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'You do not have the right permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam && hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'You are not a part of any team. Please check with your administrator.'
+        };
+      }
+    }
+
+    // Case 3: User is agent only
+    else if ( isAgent ) {
+      if ( !hasTeam && !hasPermissions ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasPermissions ) {
+        return {
+          error: true,
+          message: 'You do not have the required permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam && ( hasAgentsPermission || hasSeniorAgentsPermission ) ) {
+        return {
+          error: true,
+          message: 'You are not a part of any team. Please check with your administrator.'
+        };
+      }
+    }
+
+    // If no error conditions are met
+    return { error: false };
+  }
+
+
   async getUserInfoFromToken( username, token ) {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token/introspect";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token/introspect";
 
       let config = {
 
@@ -469,10 +964,10 @@ class KeycloakService extends Keycloak {
         if ( !userInfo.data.active ) {
 
           reject( {
-            error_message: "Error Occured While Getting User Info From Token",
+            error_message: "Token Validation Error: An error occurred while retrieving user information from the token.",
             error_detail: {
               status: 401,
-              reason: `Provided Access Token Expired. Please Provide Valid Access Token`
+              reason: `Expired Token: The provided access token has expired. Please provide a valid access token.`
             }
           } );
 
@@ -486,7 +981,7 @@ class KeycloakService extends Keycloak {
         error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Getting User Info From Token",
+          error_message: "Token Validation Error: An error occurred while retrieving user information from the token.",
           error_detail: error
         } );
       }
@@ -501,7 +996,7 @@ class KeycloakService extends Keycloak {
 
       let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients?clientId=" + keycloakConfig[ "CLIENT_ID" ];
 
-      var config = {
+      let config = {
         method: "get",
         url: URL,
         headers: {
@@ -527,7 +1022,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching ClientID in ClientID Component.",
+          error_message: "Client ID Fetch Error: An error occurred while fetching the client id in the client id component.",
           error_detail: error
         } );
 
@@ -540,7 +1035,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -591,7 +1086,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Creating Resource",
+              error_message: "Resource Creation Error: An error occurred while creating the resource.",
               error_detail: error
             } );
 
@@ -605,7 +1100,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating P.A.T Token",
+          error_message: "PAT Token Generation Error: An error occurred while generating the personal access token.",
           error_detail: error
         } );
 
@@ -619,7 +1114,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -697,7 +1192,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Deleting Auth Policy in Delete Resource",
+                  error_message: "Auth Policy Deletion Error: An error occurred while deleting the authorization policy.",
                   error_detail: error
                 } );
               }
@@ -708,7 +1203,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Generating Admin Token in Delete Resource",
+                error_message: "Admin Token Generation Error: An error occurred while generating the admin token.",
                 error_detail: error
               } );
 
@@ -719,7 +1214,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Deleting Auth Resource",
+              error_message: "Auth Resource Deletion Error: An error occurred while deleting the authorization resource.",
               error_detail: error
             } );
 
@@ -731,7 +1226,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating P.A.T Token in Delete Resource",
+          error_message: "PAT Token Generation Error: An error occurred while generating the personal access token.",
           error_detail: error
         } );
       }
@@ -746,7 +1241,7 @@ class KeycloakService extends Keycloak {
 
       let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients/" + clientId + "/authz/resource-server/policy?name=" + policyName + "&exact=true";
 
-      var config = {
+      let config = {
 
         method: "get",
         url: URL,
@@ -774,7 +1269,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Policy For Team Supervisor Assignment During Finesse User Creation.",
+          error_message: "Policy Fetch Error: An error occurred while fetching the policy for team supervisor assignment during Finesse user creation.",
           error_detail: error
         } );
       }
@@ -790,9 +1285,9 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -848,7 +1343,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Creating Role Based Policy",
+            error_message: "Role-Based Policy Creation Error: An error occurred while creating the role-based policy.",
             error_detail: error
           } );
         }
@@ -858,7 +1353,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Creation OF Policy",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during policy creation.",
           error_detail: error
         } );
       }
@@ -876,7 +1371,7 @@ class KeycloakService extends Keycloak {
 
       delete policyObj.id;
 
-      var config = {
+      let config = {
 
         method: "put",
         url: URL,
@@ -905,7 +1400,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Updating User-Based Policy During Finesse User Creation.",
+          error_message: "User-Based Policy Update Error: An error occurred while updating the user-based policy during Finesse user creation.",
           error_detail: error
         } );
 
@@ -919,9 +1414,9 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -979,7 +1474,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured During Creation Of Auth Permission.",
+            error_message: "Auth Permission Creation Error: An error occurred during the creation of the authorization permission.",
             error_detail: error
           } );
 
@@ -990,7 +1485,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Creation Of Permission.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during permission creation.",
           error_detail: error
         } );
       }
@@ -1004,7 +1499,7 @@ class KeycloakService extends Keycloak {
 
       let token;
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1029,7 +1524,7 @@ class KeycloakService extends Keycloak {
         token = adminTokenResponse.data.access_token;
 
         // EVALUATION REQUEST
-        var data = JSON.stringify( {
+        let data = JSON.stringify( {
           resources: [ { _id: resource_name } ],
           clientId: keycloakConfig.CLIENT_DB_ID,
           userId: keycloak_user_id,
@@ -1060,7 +1555,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured During Auth Evaluation Process.",
+            error_message: "Auth Evaluation Error: An error occurred during the authorization evaluation process.",
             error_detail: error
           } );
         }
@@ -1070,7 +1565,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Resource Evaluation Process.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during the resource evaluation process.",
           error_detail: error
         } );
       }
@@ -1083,7 +1578,7 @@ class KeycloakService extends Keycloak {
 
       let token;
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1126,7 +1621,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Deletion Of Policy.",
+            error_message: "Policy Deletion Error: An error occurred while deleting the policy.",
             error_detail: error
           } );
         }
@@ -1136,7 +1631,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token During Deletion Of Policy.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token during policy deletion.",
           error_detail: error
         } );
       }
@@ -1148,10 +1643,10 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let team = { userTeam: {}, supervisedTeams: [] };
+      let team = { userTeam: {}, supervisedTeams: [], permissionGroups: [] };
       let error;
 
-      var config = {
+      let config = {
         method: "get",
         headers: {
           Accept: "application/json",
@@ -1173,10 +1668,10 @@ class KeycloakService extends Keycloak {
 
           if ( Object.keys( userTeam ).length == 0 && type != 'CX' ) {
             reject( {
-              error_message: "Error Occured While Fetching User Team.",
+              error_message: "User Team Fetch Error: An error occurred while fetching the user's team.",
               error_detail: {
                 status: 403,
-                reason: "No Teams group assigned to User, please assign a Team to user. If user has no team then assign it default group."
+                reason: "Missing Team Group: No team group is assigned to the user. Please assign a team to the user. If the user has no team, assign the default group."
               }
             } );
           }
@@ -1189,7 +1684,7 @@ class KeycloakService extends Keycloak {
           error = await errorService.handleError( er );
 
           // Log the error and proceed with default values
-          console.error( "Error while fetching user team:", error );
+          console.error( "User Team Fetch Error: An error occurred while fetching the user's team:", error );
 
         }
 
@@ -1221,7 +1716,7 @@ class KeycloakService extends Keycloak {
 
           error = await errorService.handleError( er );
           // Log the error and proceed with default values
-          console.error( "Error while fetching user group:", error );
+          console.error( "User Team Fetch Error: An error occurred while fetching the user's team:", error );
         }
 
         resolve( team );
@@ -1231,7 +1726,7 @@ class KeycloakService extends Keycloak {
         error = await errorService.handleError( er );
 
         reject( {
-          error_message: "Error Occured While Generating Admin Access Token To Fetch User Team and User Supervised Teams.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin access token to fetch the user's team and supervised teams.",
           error_detail: error
         } );
       }
@@ -1245,7 +1740,7 @@ class KeycloakService extends Keycloak {
 
       let token;
       let message;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
 
 
@@ -1268,7 +1763,7 @@ class KeycloakService extends Keycloak {
 
         if ( keycloakObj.username != verifyToken.preferred_username ) {
 
-          message = `The data provided in Keycloak Object as an Argument doesn't belong to current Logged-In user.`;
+          message = `Invalid Keycloak Object: The data provided in the Keycloak object as an argument does not belong to the current logged-in user.`;
 
           resolve( {
 
@@ -1279,7 +1774,7 @@ class KeycloakService extends Keycloak {
 
         }
 
-        var config = {
+        let config = {
 
           method: "post",
           url: URL,
@@ -1338,7 +1833,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Fetching Groups In Team Users List Component.",
+                error_message: "Groups Fetch Error: An error occurred while fetching the groups in the team users list component.",
                 error_detail: error
               } );
             }
@@ -1373,7 +1868,7 @@ class KeycloakService extends Keycloak {
 
                   if ( !group ) {
 
-                    message = `Given User doesn't suprvise any group against id: ${id}`;
+                    message = `No Supervised Groups: The given user does not supervise any group with the specified id: ${id}`;
 
                     resolve( {
                       status: 404,
@@ -1403,14 +1898,14 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Generating Admin Token During Fetching Of Team Users.",
+            error_message: "Admin Token Generation Error: An error occurred while generating the admin token during the fetching of team users.",
             error_detail: error
           } );
 
         }
       }
 
-      message = "Please pass the valid arguments. First argument must be  (should not be empty object," +
+      message = "Invalid Arguments: Please pass the valid arguments. First argument must be  (should not be empty object," +
         "must contain valid key-value pair) and Second argument must be Array of groupIds (could be an empty array)" +
         "3rd Argument must be valid Access Token of current logged-in user.";
 
@@ -1430,9 +1925,9 @@ class KeycloakService extends Keycloak {
 
       let token;
       let groupsData = [];
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
 
         method: "post",
         url: URL,
@@ -1511,7 +2006,7 @@ class KeycloakService extends Keycloak {
 
                       reject( {
 
-                        error_message: "Error Occured While Fetching Supervisor Users In Team Members List Component.",
+                        error_message: "Supervisor Users Fetch Error: An error occurred while fetching supervisor users in the team members list component.",
                         error_detail: error
                       } );
                     }
@@ -1553,7 +2048,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Fetching Teams Against TeamIds In Team Members List Component.",
+                  error_message: "Teams Fetch Error: An error occurred while fetching teams against team IDs in the team members list component.",
                   error_detail: error
                 } );
 
@@ -1565,7 +2060,7 @@ class KeycloakService extends Keycloak {
 
                   reject( {
 
-                    error_message: "Error Occured While Fetching Teams Against TeamIds In Team Members List Component.",
+                    error_message: "Teams Fetch Error: An error occurred while fetching teams against team ids in the team members list component.",
                     error_detail: error
                   } );
                 }
@@ -1588,7 +2083,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token In Team Members List Component.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token in the team members list component.",
           error_detail: error
         } );
 
@@ -1673,7 +2168,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Fetching Users Against Roles In Get Users By Role Component.",
+                error_message: "Users by Role Fetch Error: An error occurred while fetching users against roles in the get users by role component.",
                 error_detail: error
               } );
             }
@@ -1690,7 +2185,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Generating Admin Token In Get Users By Role Component.",
+          error_message: "Admin Token Generation Error: An error occurred while generating the admin token in the get users by role component.",
           error_detail: error
         } );
       }
@@ -1722,7 +2217,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Realm Roles.",
+          error_message: "Realm Roles Fetch Error: An error occurred while fetching realm roles.",
           error_detail: error
         } );
 
@@ -1757,7 +2252,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Assigning Role To User.",
+          error_message: "Role Assignment Error: An error occurred while assigning the role to the user.",
           error_detail: error
         } );
       }
@@ -1790,7 +2285,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Groups of User using UsedId.",
+          error_message: "User Groups Fetch Error: An error occurred while fetching the groups of the user using the user id.",
           error_detail: error
         } );
       }
@@ -1845,7 +2340,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Fetching Groups using GroupName.",
+            error_message: "Groups by Name Fetch Error: An error occurred while fetching groups using the group name.",
             error_detail: error
           } );
         }
@@ -1885,7 +2380,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Fetching Group using GroupId.",
+          error_message: "Group by ID Fetch Error: An error occurred while fetching the group using the group id.",
           error_detail: error
         } );
       }
@@ -1932,7 +2427,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Adding/Removing Roles of User using UsedId.",
+            error_message: "User Roles Modification Error: An error occurred while adding or removing roles of the user using the user id.",
             error_detail: error
           } );
 
@@ -1954,7 +2449,7 @@ class KeycloakService extends Keycloak {
 
       if ( realmRoles.length > 0 ) {
 
-        let check = this.checkForMissingRole( realmRoles, roles );
+        let check = checkForMissingRole( realmRoles, roles );
 
         if ( !check ) {
 
@@ -1992,7 +2487,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Adding/Removing Roles of User using UsedId.",
+          error_message: "User Roles Modification Error: An error occurred while adding or removing roles of the user using the user id.",
           error_detail: error
         } );
       }
@@ -2029,7 +2524,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Creation Of Group In Create Group Component.",
+          error_message: "Group Creation Error: An error occurred while creating the group in the create group component.",
           error_detail: error
         } );
       }
@@ -2068,6 +2563,8 @@ class KeycloakService extends Keycloak {
 
         if ( finesseLoginResponse.status == 200 ) {
 
+          console.log( finesseLoginResponse.data );
+
           try {
 
             //Fetching admin token, we pass it in our "Create User" API for authorization
@@ -2102,7 +2599,7 @@ class KeycloakService extends Keycloak {
 
                 if ( err.error_detail.status == 401 ) {
 
-                  console.log( "User doesn't exist in Keycloak, syncing finesse user in keycloak..." );
+                  console.log( "User Not Found in Keycloak: The user does not exist in Keycloak. Syncing Finesse user in Keycloak." );
                 } else {
 
                   reject( err );
@@ -2119,7 +2616,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error While Fetching Keycloak Admin Token In Authenticate/Sync Finesse User Component.",
+              error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the authenticate/sync finesse user component.",
               error_detail: error
             } );
 
@@ -2145,7 +2642,7 @@ class KeycloakService extends Keycloak {
 
                   reject( {
                     status: 400,
-                    message: "Error while creation of user, error message: " + error.details[ 0 ].message,
+                    message: "User Creation Error: An error occurred while creating the user. Error message: " + error.details[ 0 ].message,
                   } );
                 }
               }
@@ -2168,7 +2665,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error While Creation Of Finesse User In Authenticate/Sync Finesse User Component.",
+                  error_message: "Finesse User Creation Error: An error occurred while creating the finesse user in the authenticate/sync finesse user component.",
                   error_detail: error
                 } );
 
@@ -2254,7 +2751,7 @@ class KeycloakService extends Keycloak {
 
           if ( realmRoles.length > 0 ) {
 
-            let check = this.checkForMissingRole( realmRoles, userObject.roles );
+            let check = checkForMissingRole( realmRoles, userObject.roles );
 
             if ( !check ) {
 
@@ -2292,7 +2789,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Assignment of Role To User In Finesse User Creation Component.",
+              error_message: "Role Assignment Error: An error occurred while assigning the role to the user in the Finesse user creation component.",
               error_detail: error
             } );
           }
@@ -2362,7 +2859,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Creating CX Core Team.",
+                error_message: "Finesse Team Sync Error: Error occured while creating cx core team.",
                 error_detail: error
               } );
             }
@@ -2393,7 +2890,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Sending User Details to CX.",
+              error_message: "Finesse Team Sync Error: Error occured while sending user details to cx.",
               error_detail: error
             } );
           }
@@ -2413,7 +2910,6 @@ class KeycloakService extends Keycloak {
 
             //Assigning Agent to CX team
             let assignAgentToTeam = await requestController.httpRequest( config2, false );
-            console.log( assignAgentToTeam.data );
 
           } catch ( er ) {
 
@@ -2421,7 +2917,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Assigning Agent to CX Core Team.",
+              error_message: "Finesse Team Sync Error: Error occured while assigning agent to cx core team.",
               error_detail: error
             } );
           }
@@ -2432,7 +2928,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Fetching CX Core Team.",
+            error_message: "Finesse Team Sync Error: Error occured while fetching cx core team.",
             error_detail: error
           } );
         }
@@ -2440,7 +2936,6 @@ class KeycloakService extends Keycloak {
 
 
         if ( userObject.roles.includes( "supervisor" ) && userObject.supervisedGroups.length > 0 ) {
-
 
           for ( let supervisedGroup of userObject.supervisedGroups ) {
 
@@ -2484,40 +2979,78 @@ class KeycloakService extends Keycloak {
 
                   reject( {
 
-                    error_message: "Error Occured While Creating CX Core Team.",
+                    error_message: "Finesse Team Sync Error: Error occured while creating cx core team.",
                     error_detail: error
                   } );
                 }
 
               } else {
 
-                //Check whether team of Supervisor already exists in CX Core or not
-                let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+                console.log( getSupervisorCXTeam.data[ 0 ].supervisor_Id );
 
-                let data = {
-                  "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
-                  "supervisor_Id": userId
-                }
+                //Adding this supervisor as Secondary Supervisor
+                if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
-                config2.method = 'put';
-                config2.url = URL7;
-                config2.data = data;
+                  //Assign Secondary Supervisor to a team
+                  let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+
+                  data = {
+                    "type": "secondary-supervisor",
+                    "usernames": [ userObject.username.toLocaleLowerCase() ]
+                  }
+
+                  config2.method = 'post';
+                  config2.url = URL7;
+                  config2.data = data;
+
+                  console.log( config2 );
+
+                  try {
+
+                    //Assigning Secondary Supervisor to CX team
+                    let assignSecondarySupervisorToTeam = await requestController.httpRequest( config2, false );
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+
+                      error_message: "Finesse Team Sync Error: Error occured while assigning secondary supervisor to cx core team.",
+                      error_detail: error
+                    } );
+                  }
+
+                } else {
+
+                  //Check whether team of Supervisor already exists in CX Core or not
+                  let URL8 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+
+                  let data = {
+                    "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                    "supervisor_Id": userId
+                  }
+
+                  config2.method = 'put';
+                  config2.url = URL8;
+                  config2.data = data;
 
 
-                try {
+                  try {
 
-                  //Updating CX team of Supervisor
-                  let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+                    //Updating CX team of Supervisor
+                    let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
 
-                } catch ( er ) {
+                  } catch ( er ) {
 
-                  let error = await errorService.handleError( er );
+                    let error = await errorService.handleError( er );
 
-                  reject( {
+                    reject( {
 
-                    error_message: "Error Occured While Updating CX Core Team.",
-                    error_detail: error
-                  } );
+                      error_message: "Finesse Team Sync Error: Error occured while updating cx core team.",
+                      error_detail: error
+                    } );
+                  }
                 }
 
               }
@@ -2529,7 +3062,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Fetching CX Core Team.",
+                error_message: "Finesse Team Sync Error: Error occured while fetching cx core team.",
                 error_detail: error
               } );
             }
@@ -2548,7 +3081,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Creation Of User In Finesse User Creation Component.",
+          error_message: "User Creation Error: An error occurred while creating the user in the Finesse user creation component.",
           error_detail: error
         } );
       }
@@ -2622,7 +3155,7 @@ class KeycloakService extends Keycloak {
 
           reject( {
 
-            error_message: "Error Occured While Fetching User Data during Cisco User Sync Update Process.",
+            error_message: "User Data Fetch Error: An error occurred while fetching user data during the Cisco user sync update process.",
             error_detail: error
           } );
 
@@ -2668,7 +3201,7 @@ class KeycloakService extends Keycloak {
 
             reject( {
 
-              error_message: "Error Occured While Updating User Info during Cisco User Sync Process.",
+              error_message: "User Info Update Error: An error occurred while updating user information during the Cisco user sync process.",
               error_detail: error
             } );
 
@@ -2730,14 +3263,6 @@ class KeycloakService extends Keycloak {
                 rolesPromises.push( removeRolesPromise );
               }
 
-              /* if ( rolesToAdd.includes( "supervisor" ) ) {
-
-                keycloakAuthToken = await this.getAccessToken( keyObj.username, password, keycloakConfig[ "realm" ] );
-                rptToken = await this.getTokenRPT( keyObj.username, password, keycloakAuthToken.access_token );
-                introspectToken = await this.getIntrospectToken( rptToken.access_token );
-                keyObj.permittedResources.Resources = introspectToken.authorization.permissions;
-              } */
-
               // Wait for all promises to complete before moving on
               await Promise.all( rolesPromises );
             }
@@ -2795,11 +3320,22 @@ class KeycloakService extends Keycloak {
 
                 if ( supervisedTeams.length > 0 ) {
 
-                  // Filter teams where the user is the primary supervisor
-                  supervisedTeamsFiltered = supervisedTeams.filter( team => team.supervisor.toLocaleLowerCase() === username.toLocaleLowerCase() )
-                    .map( team => {
-                      return { teamId: team.teamId, teamName: team.teamName };
-                    } );
+                  //Fetching list of all primary and seconday supervised teams of current user (Whether in CX or Cisco)
+                  supervisedTeamsFiltered = supervisedTeams.filter( team => {
+                    const isPrimarySupervisor = team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase();
+                    const isSecondarySupervisor = team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() );
+
+                    return isPrimarySupervisor || isSecondarySupervisor;
+                  } ).map( team => {
+                    let type;
+                    if ( team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) {
+                      type = 'supervisor';
+                    } else if ( team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) ) {
+                      type = 'secondary supervisor';
+                    }
+
+                    return { teamId: team.teamId, teamName: team.teamName, type, source: team.source };
+                  } );
                 }
 
                 //If Agent team in finesse is different from Agent Team in finesse
@@ -2821,7 +3357,7 @@ class KeycloakService extends Keycloak {
                     let error = await errorService.handleError( er );
 
                     reject( {
-                      error_message: "Error Occurred while Deleting User from a team In Finesse User Login (Update).",
+                      error_message: "Finesse Team Sync Error: Error occurred while deleting user from a team in finesse user login (update).",
                       error_detail: error
                     } );
 
@@ -2868,7 +3404,7 @@ class KeycloakService extends Keycloak {
 
                         reject( {
 
-                          error_message: "Error Occured While Creating CX Core Team To Add User In Finesse User Login (Update).",
+                          error_message: "Finesse Team Sync Error: Error occured while creating cx core team to add user in finesse user login (update).",
                           error_detail: error
                         } );
                       }
@@ -2897,7 +3433,7 @@ class KeycloakService extends Keycloak {
 
                       reject( {
 
-                        error_message: "Error Occured While Assigning Agent to CX Core Team In Finesse User Login (Update).",
+                        error_message: "Finesse Team Sync Error: Error occured while assigning agent to cx core team in finesse user login (update).",
                         error_detail: error
                       } );
                     }
@@ -2907,43 +3443,75 @@ class KeycloakService extends Keycloak {
                     let error = await errorService.handleError( er );
 
                     reject( {
-                      error_message: "Error Occured While Fetching User Team To Add User In Finesse User Login (Update).",
+                      error_message: "Finesse Team Sync Error: Error occured while fetching user team to add user in finesse user login (update).",
                       error_detail: error
                     } );
 
                   }
                 }
 
+                //If no team is assigned to supervise to current user in Cisco, remove its all supervised teams from CX
                 if ( !finObj.supervisedGroups && supervisedTeamsFiltered.length > 0 ) {
 
                   for ( let supervisedTeam of supervisedTeamsFiltered ) {
 
-                    //Removing user from Supervising team in CX Core or not
-                    let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                    if ( supervisedTeam.source === 'CISCO' ) {
 
-                    let data = {
-                      "team_name": supervisedTeam.teamName,
-                      "supervisor_Id": null
-                    }
+                      if ( supervisedTeam.type === 'secondary supervisor' ) {
 
-                    config2.method = 'put';
-                    config2.url = URL7;
-                    config2.data = data;
+                        //Removing user from Secondary Supervisor in CX Core
+                        let URL13 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
 
-                    try {
+                        config2.method = 'delete';
+                        config2.url = URL13;
 
-                      //Updating CX team of Supervisor
-                      let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+                        try {
 
-                    } catch ( er ) {
+                          //Updating CX team of Supervisor
+                          let removeSecondarySupervisor = await requestController.httpRequest( config2, false );
 
-                      let error = await errorService.handleError( er );
+                        } catch ( er ) {
 
-                      reject( {
+                          let error = await errorService.handleError( er );
 
-                        error_message: "Error Occured While Updating CX Core Team.",
-                        error_detail: error
-                      } );
+                          reject( {
+
+                            error_message: "Finesse Team Sync Error: Error occured while updating cx core team to remove secondary supervisor.",
+                            error_detail: error
+                          } );
+                        }
+
+
+                      } else {
+
+                        //Removing user from Supervising team in CX Core or not
+                        let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+
+                        let data = {
+                          "team_name": supervisedTeam.teamName,
+                          "supervisor_Id": null
+                        }
+
+                        config2.method = 'put';
+                        config2.url = URL7;
+                        config2.data = data;
+
+                        try {
+
+                          //Updating CX team of Supervisor
+                          let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                        } catch ( er ) {
+
+                          let error = await errorService.handleError( er );
+
+                          reject( {
+
+                            error_message: "Finesse Team Sync Error: Error occured while updating cx core team.",
+                            error_detail: error
+                          } );
+                        }
+                      }
                     }
 
                   }
@@ -3006,42 +3574,75 @@ class KeycloakService extends Keycloak {
 
                             reject( {
 
-                              error_message: "Error Occured While Creating CX Core Team To Add Supervisor in Finesse User Login (Update).",
+                              error_message: "Finesse Team Sync Error: Error occured while creating cx core team to add supervisor in finesse user login (update).",
                               error_detail: error
                             } );
                           }
 
                         } else {
 
-                          //Check whether team of Supervisor already exists in CX Core or not
-                          let URL10 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+                          //If the supervisor is already assigned to team, add current user as secondary supervisor.
+                          if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
-                          let data = {
-                            "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
-                            "supervisor_Id": userId
+                            //Assign Agent to a team
+                            let URL10 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+
+                            data = {
+                              "type": "secondary-supervisor",
+                              "usernames": [ finObj.username.toLowerCase() ]
+                            }
+
+                            config2.method = 'post';
+                            config2.url = URL10;
+                            config2.data = data;
+
+                            try {
+
+                              //Assigning Secondary Supervisor to CX team
+                              let assignSecondarySupervisorToTeam = await requestController.httpRequest( config2, false );
+
+                            } catch ( er ) {
+
+                              let error = await errorService.handleError( er );
+
+                              reject( {
+
+                                error_message: "Finesse Team Sync Error: Error occured while assigning secondary supervisor to cx core team.",
+                                error_detail: error
+                              } );
+                            }
+
+                          } else {
+
+                            //Adding current user as Supervisor to team
+                            let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+
+                            let data = {
+                              "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                              "supervisor_Id": userId
+                            }
+
+                            config2.method = 'put';
+                            config2.url = URL11;
+                            config2.data = data;
+
+
+                            try {
+
+                              //Updating CX team of Supervisor
+                              let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                            } catch ( er ) {
+
+                              let error = await errorService.handleError( er );
+
+                              reject( {
+
+                                error_message: "Finesse Team Sync Error: Error occured while updating cx core team to add supervisor in finesse user login (update).",
+                                error_detail: error
+                              } );
+                            }
                           }
-
-                          config2.method = 'put';
-                          config2.url = URL10;
-                          config2.data = data;
-
-
-                          try {
-
-                            //Updating CX team of Supervisor
-                            let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
-
-                          } catch ( er ) {
-
-                            let error = await errorService.handleError( er );
-
-                            reject( {
-
-                              error_message: "Error Occured While Updating CX Core Team To Add Supervisor in Finesse User Login (Update).",
-                              error_detail: error
-                            } );
-                          }
-
 
                         }
 
@@ -3051,7 +3652,7 @@ class KeycloakService extends Keycloak {
 
                         reject( {
 
-                          error_message: "Error Occured While Fetching CX Core Team To Add Supervisor in Finesse User Login (Update).",
+                          error_message: "Finesse Team Sync Error: Error occured while fetching cx core team to add supervisor in finesse user login (update).",
                           error_detail: error
                         } );
                       }
@@ -3070,32 +3671,65 @@ class KeycloakService extends Keycloak {
 
                     for ( let supervisedTeam of teamsToRemoveFromCX ) {
 
-                      //Removing user from Supervising team in CX Core or not
-                      let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                      //Only removing user from supervising teams that are from Cisco
+                      if ( supervisedTeam.source === 'CISCO' ) {
 
-                      let data = {
-                        "team_name": supervisedTeam.teamName,
-                        "supervisor_Id": null
-                      }
+                        if ( supervisedTeam.type === 'secondary supervisor' ) {
 
-                      config2.method = 'put';
-                      config2.url = URL11;
-                      config2.data = data;
+                          //Removing user from Secondary Supervisor in CX Core
+                          let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
 
-                      try {
+                          config2.method = 'delete';
+                          config2.url = URL11;
 
-                        //Updating CX team of Supervisor
-                        let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+                          try {
 
-                      } catch ( er ) {
+                            //Updating CX team of Supervisor
+                            let removeSecondarySupervisor = await requestController.httpRequest( config2, false );
 
-                        let error = await errorService.handleError( er );
+                          } catch ( er ) {
 
-                        reject( {
+                            let error = await errorService.handleError( er );
 
-                          error_message: "Error Occured While Updating CX Core Team To Remove Supervisor.",
-                          error_detail: error
-                        } );
+                            reject( {
+
+                              error_message: "Finesse Team Sync Error: Error occured while updating cx core team to remove secondary supervisor.",
+                              error_detail: error
+                            } );
+                          }
+
+
+                        } else {
+
+                          //Removing user from Supervising team in CX Core
+                          let URL12 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+
+                          let data = {
+                            "team_name": supervisedTeam.teamName,
+                            "supervisor_Id": null
+                          }
+
+                          config2.method = 'put';
+                          config2.url = URL12;
+                          config2.data = data;
+
+                          try {
+
+                            //Updating CX team of Supervisor
+                            let updateSupervisorCXTeam = await requestController.httpRequest( config2, false );
+
+                          } catch ( er ) {
+
+                            let error = await errorService.handleError( er );
+
+                            reject( {
+
+                              error_message: "Finesse Team Sync Error: Error occured while updating cx core team to remove supervisor.",
+                              error_detail: error
+                            } );
+                          }
+                        }
+
                       }
 
                     }
@@ -3109,7 +3743,7 @@ class KeycloakService extends Keycloak {
                 let error = await errorService.handleError( er );
 
                 reject( {
-                  error_message: "Error Occured While Fetching User Team in Finesse User Login (Update).",
+                  error_message: "Finesse Team Sync Error: Error occured while fetching user team in finesse user login (update).",
                   error_detail: error
                 } );
 
@@ -3140,7 +3774,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let passwordUpdate = false;
-      var URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false"
+      let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false&exact=true"
 
       let config = {
         method: "get",
@@ -3184,7 +3818,7 @@ class KeycloakService extends Keycloak {
 
               reject( {
 
-                error_message: "Error Occured While Generating User Access Token in Check Updated Password Component.",
+                error_message: "User Access Token Generation Error: An error occurred while generating the user access token in the check updated password component.",
                 error_detail: error
               } );
             }
@@ -3196,7 +3830,7 @@ class KeycloakService extends Keycloak {
               let userId = userResponse.data[ 0 ].id;
 
               //API URL used to update the password.
-              var URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
+              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
 
               let data = {
                 "temporary": false,
@@ -3225,7 +3859,7 @@ class KeycloakService extends Keycloak {
 
                 reject( {
 
-                  error_message: "Error Occured While Updating Password of User in Check Updated Password Component.",
+                  error_message: "Password Update Error: An error occurred while updating the password of the user in the check updated password component.",
                   error_detail: error
                 } );
 
@@ -3246,7 +3880,7 @@ class KeycloakService extends Keycloak {
 
         reject( {
 
-          error_message: "Error Occured While Searching for User by Username in Check Updated Password Component.",
+          error_message: "User Search Error: An error occurred while searching for the user by username in the check updated password component.",
           error_detail: error
         } );
       }
@@ -3257,9 +3891,9 @@ class KeycloakService extends Keycloak {
   async generateAccessTokenFromRefreshToken( refreshToken ) {
     return new Promise( async ( resolve, reject ) => {
       let accessToken;
-      var URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
 
-      var config = {
+      let config = {
         method: "post",
         url: URL,
         headers: {
@@ -3284,7 +3918,7 @@ class KeycloakService extends Keycloak {
       } catch ( error ) {
         if ( error.response ) {
           if ( error.response.data.error_description == "Token is not active" ) {
-            error.response.data.error_description = "Refresh Token expired, please login again";
+            error.response.data.error_description = "Refresh Token Expired: The refresh token has expired. Please log in again.";
           }
 
           reject( {
@@ -3297,6 +3931,7 @@ class KeycloakService extends Keycloak {
       }
     } );
   }
+
 
   async encryptUserObject( adminToken, userObject ) {
 
@@ -3527,348 +4162,282 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  async createExternalUser( userObject, token ) {
-
-    let assignRole = [];
-    let assignGroups = [];
-
-    assignGroups = userObject.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
-
-    return new Promise( async ( resolve, reject ) => {
-
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users`;
-
-      let data = {
-
-        username: userObject.username,
-        firstName: userObject.firstName,
-        lastName: userObject.lastName,
-        enabled: true,
-        credentials: [
-          {
-            type: "password",
-            value: userObject.password,
-            temporary: false,
-          },
-        ],
-        attributes: {
-          "extension": `${userObject.attributes.extension}`
-        },
-        groups: assignGroups
-      };
-
-      let config = {
-
-        method: "post",
-        url: URL,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        data: data,
-
-      };
-
-      try {
-
-        let newUser = await requestController.httpRequest( config, false );
-
-        //Get the user id at time of creation
-        let userLocation = newUser.headers.location;
-        let userLocationSplit = userLocation.split( "/" );
-        let userId = userLocationSplit[ userLocationSplit.length - 1 ];
-
-        //Get list of all the roles in keycloak realm
-        /* Storing all the realm roles in Global realmRoles list.If some role come from finesse which doesn't
-        exist in realmRoles list then we call keycloak roles api again to update realmRoles list. */
-        if ( userObject.roles != [] ) {
-
-          if ( realmRoles.length > 0 ) {
-
-            let check = this.checkForMissingRole( realmRoles, userObject.roles );
-
-            if ( !check ) {
-
-              realmRoles = await this.getRealmRoles( token );
-            }
-
-          } else {
-
-            realmRoles = await this.getRealmRoles( token );
-          }
-
-          //checking whether role exist in realmRoles object array:
-          for ( let role of realmRoles ) {
-
-            userObject.roles.forEach( ( userRole ) => {
-
-              if ( role.name == userRole.toLocaleLowerCase() ) {
-
-                assignRole.push( {
-                  id: role.id,
-                  name: role.name,
-                } );
-              }
-            } );
-          }
-
-          try {
-
-            //assigning role to user
-            let roleAssigned = await this.assignRoleToUser( userId, assignRole, token );
-
-          } catch ( er ) {
-
-            let error = await errorService.handleError( er );
-
-            reject( {
-
-              error_message: "Error Occured While Assignment of Role To User In Finesse User Creation Component.",
-              error_detail: error
-            } );
-          }
-        }
-
-        resolve( newUser );
-
-
-      } catch ( er ) {
-
-        let error = await errorService.handleError( er );
-
-        reject( {
-
-          error_message: "Error Occured While Creation Of User In Finesse User Creation Component.",
-          error_detail: error
-        } );
+  async authenticateUser( userObject ) {
+    try {
+      // Validate input
+      if ( !userObject || !userObject.username || !userObject.password ) {
+        throw { status: 400, message: 'Username and password are required' };
       }
-    } );
-  }
 
-  async updateExternalUser( externalObj, keycloakAdminToken, keycloakAuthToken, username, password ) {
+      let keycloakAdminToken;
+      let keycloakAuthToken;
+      let userExists = true;
 
-    /* 
-        Check for changes in user role, if user is removed from supervisor role then delete all its Permissions/Policies.
-        If supervisor is added to user role then check for the groups it is supervising and create its permissions.
-    
-   
-        Check for changes in user groups, if it is removed from one group as an agent and added to other group then remove
-        user from old group and add to new group
-   
-   
-        Check for teams user is supervising, if user is assigned new teams to supervise then create its permission/policy, if
-        user is removed from supervising certain teams then remove its permissions from that team.
-  */
-
-    return new Promise( async ( resolve, reject ) => {
-
-      let data = {};
-      let userAttributes;
-
-      let rolesToAdd;
-      let rolesToRemove;
-      let groupsToAdd;
-      let groupsToRemove;
-      let keycloakGroups;
-
-
+      // Get admin token
       try {
-
-        let rptToken = await this.getTokenRPT( username, password, keycloakAuthToken.access_token );
-        let introspectToken = await this.getIntrospectToken( rptToken.access_token );
-
-        let keyObj = {
-          id: introspectToken.sub,
-          username: introspectToken.username,
-          firstName: introspectToken.given_name,
-          lastName: introspectToken.family_name,
-          roles: introspectToken.realm_access.roles,
-          permittedResources: {
-            Resources: introspectToken.authorization.permissions,
-          }
-        }
-
-        //get user attributes to check its user_name and extension
-        let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
-
-        let config = {
-
-          method: "get",
-          url: URL,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${keycloakAdminToken}`,
-          }
+        const adminData = await this.getAccessToken(
+          keycloakConfig.USERNAME_ADMIN,
+          keycloakConfig.PASSWORD_ADMIN
+        );
+        keycloakAdminToken = adminData.access_token;
+      } catch ( error ) {
+        throw {
+          status: 500,
+          message: 'Failed to get admin token',
+          detail: error
         };
-
-        try {
-
-          let userDataResponse = await requestController.httpRequest( config, false );
-          userAttributes = userDataResponse.data.attributes;
-
-        } catch ( err ) {
-
-          let error = await errorService.handleError( err );
-
-          reject( {
-
-            error_message: "Error Occured While Fetching User Data during Cisco User Sync Update Process.",
-            error_detail: error
-          } );
-
-        }
-
-        //Comparing the basic info of Finesse User and Normal User.
-        if ( ( externalObj.username ).toLowerCase() != keyObj.username
-          || externalObj.firstName != keyObj.firstName
-          || externalObj.lastName != keyObj.lastName
-          || ( externalObj.attributes.extension && externalObj.attributes.extension !== userAttributes.extension[ 0 ] )
-          || ( !userAttributes.user_name )
-        ) {
-
-          data = {
-            username: ( externalObj.username ).toLowerCase(),
-            firstName: externalObj.firstName,
-            lastName: externalObj.lastName,
-            attributes: {
-              "extension": `${externalObj.attributes.extension}`
-            }
-          };
-        }
-
-        if ( Object.keys( data ).length > 0 ) {
-
-
-          let URL1 = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
-
-          config.url = URL1;
-          config.method = 'put';
-          config.data = data;
-
-          try {
-
-            await requestController.httpRequest( config, false );
-
-
-          } catch ( err ) {
-
-            let error = await errorService.handleError( err );
-
-            reject( {
-
-              error_message: "Error Occured While Updating User Info during Cisco User Sync Process.",
-              error_detail: error
-            } );
-
-          }
-
-        }
-
-
-        //Role to Add to keycloak user during Update process.
-        //rolesToAdd = finObj.roles.filter( role => !keyObj.roles.includes( role ) );
-        rolesToAdd = externalObj.roles;
-
-        //Role to Remove from keycloak user during Update process.
-        let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
-        rolesToRemove = keyObj.roles.filter( role => (
-          !externalObj.roles.includes( role ) &&
-          !ignoreRoles.includes( role ) &&
-          role.indexOf( "default-roles" ) == -1 ) );
-
-        //Updating group data in case it is not similar.
-        let externalUserGroups = externalObj.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
-
-        try {
-
-          let token = keycloakAdminToken;
-
-          let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
-
-          keycloakGroups = userGroups.map( group => {
-            return {
-              id: group.id,
-              name: group.name
-            }
-          } );
-
-          //find if senior_agents_permission group is assigned to user already against an agent role.
-          let isSeniorAgent = keycloakGroups.some( group => group.name == 'senior_agents_permission' );
-
-          if ( isSeniorAgent && keyObj.roles.includes( 'agent' ) && !externalUserGroups.includes( 'senior_agents_permission' ) ) {
-            externalUserGroups.push( 'senior_agents_permission' );
-          }
-
-          groupsToAdd = externalUserGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
-          groupsToRemove = keycloakGroups.filter( group => !externalUserGroups.includes( group.name ) );
-
-          //Adding and Removing Roles from Keycloak
-          try {
-
-            if ( rolesToAdd.length > 0 || rolesToRemove.length > 0 ) {
-              const rolesPromises = [];
-
-              if ( rolesToAdd.length > 0 ) {
-                let addRolesPromise = this.addOrRemoveUserRole( keyObj.id, rolesToAdd, 'add', token );
-                rolesPromises.push( addRolesPromise );
-              }
-
-              if ( rolesToRemove.length > 0 ) {
-                let removeRolesPromise = this.addOrRemoveUserRole( keyObj.id, rolesToRemove, 'remove', token );
-                rolesPromises.push( removeRolesPromise );
-              }
-
-              // Wait for all promises to complete before moving on
-              await Promise.all( rolesPromises );
-            }
-
-            try {
-
-
-              if ( groupsToAdd.length > 0 ) {
-
-                //Fetching Ids of all the groups to add to current Keycloak User.
-                groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
-                await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
-              }
-
-              if ( groupsToRemove.length > 0 ) {
-
-                await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
-              }
-
-            } catch ( err ) {
-
-              reject( err );
-            }
-          } catch ( err ) {
-
-            reject( err );
-          }
-        } catch ( err ) {
-
-          reject( err );
-        }
-      } catch ( err ) {
-
-        reject( err );
       }
 
-      resolve( [] );
+      // Check if user exists
+      let existingUser;
+      try {
+        existingUser = await this.getUserDetails( keycloakAdminToken, userObject.username );
+      } catch ( error ) {
+        if ( error.status === 404 ) userExists = false;
+        else throw error;
+      }
+
+      if ( !userExists ) {
+        // Create new user
+        const createdUser = await this.createGenericUser( userObject, keycloakAdminToken );
+        existingUser = createdUser.data;
+      } else {
+        // Update existing user
+        await this.updateGenericUser( userObject, existingUser, keycloakAdminToken );
+      }
+
+      // Get final user token
+      try {
+        keycloakAuthToken = await this.getKeycloakTokenWithIntrospect(
+          userObject.username,
+          userObject.password,
+          keycloakConfig.realm,
+          'CX'
+        );
+      } catch ( error ) {
+        throw {
+          status: 401,
+          message: 'Failed to authenticate after sync',
+          detail: error
+        };
+      }
+
+      return keycloakAuthToken;
+
+    } catch ( error ) {
+      await errorService.handleError( error );
+      throw error;
+    }
+  }
+
+  /**
+   * Creates a generic user in Keycloak
+   * @param {Object} userObject - User data
+   * @param {string} adminToken - Admin access token
+   */
+  async createGenericUser( userObject, adminToken ) {
+    const userData = {
+      username: userObject.username,
+      firstName: userObject.firstName || '',
+      lastName: userObject.lastName || '',
+      enabled: true,
+      credentials: [ {
+        type: 'password',
+        value: userObject.password,
+        temporary: false
+      } ],
+      attributes: this.prepareAttributes( userObject )
+    };
+
+    if ( userObject.groups ) {
+      userData.groups = userObject.groups;
+    }
+
+    const URL = `${keycloakConfig[ 'auth-server-url' ]}admin/realms/${keycloakConfig.realm}/users`;
+
+    const config = {
+      method: 'post',
+      url: URL,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      data: userData
+    };
+
+    try {
+      const response = await requestController.httpRequest( config, false );
+
+      // Assign roles if provided
+      if ( userObject.roles && userObject.roles.length > 0 ) {
+        const userId = this.getUserIdFromLocation( response.headers.location );
+        await this.assignRoles( userId, userObject.roles, adminToken );
+      }
+
+      return response;
+    } catch ( error ) {
+      throw {
+        status: 500,
+        message: 'User creation failed',
+        detail: error
+      };
+    }
+  }
+
+  /**
+   * Updates existing user in Keycloak
+   * @param {Object} userObject - New user data
+   * @param {Object} existingUser - Existing user data
+   * @param {string} adminToken - Admin access token
+   */
+  async updateGenericUser( userObject, existingUser, adminToken ) {
+    const updateData = {};
+
+    // Basic info
+    if ( userObject.firstName !== undefined ) updateData.firstName = userObject.firstName;
+    if ( userObject.lastName !== undefined ) updateData.lastName = userObject.lastName;
+
+    // Attributes
+    updateData.attributes = this.prepareAttributes( userObject, existingUser.attributes );
+
+    // Update core data
+    const URL = `${keycloakConfig[ 'auth-server-url' ]}admin/realms/${keycloakConfig.realm}/users/${existingUser.id}`;
+
+    const config = {
+      method: 'put',
+      url: URL,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      data: updateData
+    };
+
+    try {
+      await requestController.httpRequest( config, false );
+    } catch ( error ) {
+      throw {
+        status: 500,
+        message: 'User update failed',
+        detail: error
+      };
+    }
+
+    // Handle role updates
+    if ( userObject.roles ) {
+      await this.syncRoles( existingUser.id, userObject.roles, adminToken );
+    }
+
+    // Handle group updates
+    if ( userObject.groups ) {
+      await this.syncGroups( existingUser.id, userObject.groups, adminToken );
+    }
+
+    // Update password if changed
+    if ( userObject.password ) {
+      await this.updatePassword( existingUser.id, userObject.password, adminToken );
+    }
+  }
+
+  // Helper methods
+
+  prepareAttributes( userObject, existingAttributes = {} ) {
+    const attributes = { ...existingAttributes };
+
+    // Remove standard fields
+    const standardFields = [ 'username', 'firstName', 'lastName', 'password', 'roles', 'groups' ];
+
+    // Add custom attributes
+    Object.keys( userObject ).forEach( key => {
+      if ( !standardFields.includes( key ) ) {
+        attributes[ key ] = Array.isArray( userObject[ key ] ) ?
+          userObject[ key ] : [ userObject[ key ] ];
+      }
     } );
+
+    return attributes;
   }
 
+  async syncRoles( userId, newRoles, adminToken ) {
+    const currentRoles = await this.getUserRealmRoles( userId, adminToken );
+    const rolesToAdd = newRoles.filter( role => !currentRoles.includes( role ) );
+    const rolesToRemove = currentRoles.filter( role => !newRoles.includes( role ) );
 
-  checkForMissingRole( keycloakRealmRoles, requiredRoles ) {
-
-    // Convert the object names to a Set for faster lookup
-    const rolesNamesSet = new Set( keycloakRealmRoles.map( role => role.name ) );
-
-    // Use the some method to check if at least one role is missing
-    const isMissing = requiredRoles.some( role => !rolesNamesSet.has( role ) );
-
-    return !isMissing;
+    if ( rolesToAdd.length > 0 ) {
+      await this.addOrRemoveUserRole( userId, rolesToAdd, 'add', adminToken );
+    }
+    if ( rolesToRemove.length > 0 ) {
+      await this.addOrRemoveUserRole( userId, rolesToRemove, 'remove', adminToken );
+    }
   }
+
+  async syncGroups( userId, newGroups, adminToken ) {
+    const currentGroups = await this.getKeycloakUserGroups( userId, adminToken );
+    const currentGroupNames = currentGroups.map( g => g.name );
+
+    const groupsToAdd = newGroups.filter( g => !currentGroupNames.includes( g ) );
+    const groupsToRemove = currentGroupNames.filter( g => !newGroups.includes( g ) );
+
+    if ( groupsToAdd.length > 0 ) {
+      const groups = await this.gettingGroupByGroupName( groupsToAdd, adminToken );
+      await this.addOrRemoveUserGroup( userId, groups, 'add', adminToken );
+    }
+    if ( groupsToRemove.length > 0 ) {
+      const groups = await this.gettingGroupByGroupName( groupsToRemove, adminToken );
+      await this.addOrRemoveUserGroup( userId, groups, 'remove', adminToken );
+    }
+  }
+
+  async updatePassword( userId, newPassword, adminToken ) {
+    const URL = `${keycloakConfig[ 'auth-server-url' ]}admin/realms/${keycloakConfig.realm}/users/${userId}/reset-password`;
+
+    const config = {
+      method: 'put',
+      url: URL,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      data: {
+        type: 'password',
+        value: newPassword,
+        temporary: false
+      }
+    };
+
+    await requestController.httpRequest( config, false );
+  }
+
+  getUserIdFromLocation( locationHeader ) {
+    return locationHeader.split( '/' ).pop();
+  }
+
+  async getUserRealmRoles( userId, adminToken ) {
+    const URL = `${keycloakConfig[ 'auth-server-url' ]}admin/realms/${keycloakConfig.realm}/users/${userId}/role-mappings/realm`;
+
+    const config = {
+      method: 'get',
+      url: URL,
+      headers: {
+        Authorization: `Bearer ${adminToken}`
+      }
+    };
+
+    const response = await requestController.httpRequest( config, false );
+    return response.data.map( role => role.name );
+  }
+
+}
+
+function checkForMissingRole( keycloakRealmRoles, requiredRoles ) {
+
+  // Convert the object names to a Set for faster lookup
+  const rolesNamesSet = new Set( keycloakRealmRoles.map( role => role.name ) );
+
+  // Use the some method to check if at least one role is missing
+  const isMissing = requiredRoles.some( role => !rolesNamesSet.has( role ) );
+
+  return !isMissing;
 }
 
 function validateUser( userData ) {
