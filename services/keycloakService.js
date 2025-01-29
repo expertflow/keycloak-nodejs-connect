@@ -2528,7 +2528,7 @@ class KeycloakService extends Keycloak {
   }
 
   //Authenticating Finesse User
-  async authenticateFinesse( username, password, finesseUrl, agentExtension = [], finesseToken ) {
+  async authenticateFinesse( username, password, finesseUrl, agentExtension, finesseToken ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -2536,6 +2536,7 @@ class KeycloakService extends Keycloak {
       let finesseLoginResponse;
 
       try {
+
         //Handle finesse error cases correctly. (for later)
         if ( finesseToken.length == 0 ) {
 
@@ -2577,7 +2578,7 @@ class KeycloakService extends Keycloak {
                   .then( async ( updatedUser ) => {
 
                     //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
-                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ], 'CISCO' );
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, keycloakConfig[ "realm" ], 'CISCO' );
                   } )
                   .catch( ( err ) => {
 
@@ -2927,9 +2928,7 @@ class KeycloakService extends Keycloak {
           } );
         }
 
-
-
-        if ( userObject.roles.includes( "supervisor" ) && userObject.supervisedGroups.length > 0 ) {
+        if ( userObject.roles.includes( "supervisor" ) && 'supervisedGroups' in userObject ) {
 
           for ( let supervisedGroup of userObject.supervisedGroups ) {
 
@@ -2980,8 +2979,6 @@ class KeycloakService extends Keycloak {
 
               } else {
 
-                console.log( getSupervisorCXTeam.data[ 0 ].supervisor_Id );
-
                 //Adding this supervisor as Secondary Supervisor
                 if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
@@ -2996,8 +2993,6 @@ class KeycloakService extends Keycloak {
                   config2.method = 'post';
                   config2.url = URL7;
                   config2.data = data;
-
-                  console.log( config2 );
 
                   try {
 
@@ -3685,6 +3680,7 @@ class KeycloakService extends Keycloak {
 
                           } catch ( er ) {
 
+
                             let error = await errorService.handleError( er );
 
                             reject( {
@@ -3757,6 +3753,7 @@ class KeycloakService extends Keycloak {
           reject( err );
         }
       } catch ( err ) {
+
 
         reject( err );
       }
