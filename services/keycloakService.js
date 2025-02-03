@@ -488,7 +488,7 @@ class KeycloakService extends Keycloak {
     if ( !hasRoles && !hasPermissions && !hasTeam ) {
       return {
         error: true,
-        message: 'Missing role, team or, permissions to log in. Please check with your administrator.'
+        message: 'Missing role, team, or permissions to log in. Please check with your administrator.'
       };
     }
 
@@ -517,10 +517,25 @@ class KeycloakService extends Keycloak {
 
     // Case 1: User is both agent and supervisor
     if ( isAgent && isSupervisor ) {
+
+      if ( !hasTeam && !hasSeniorAgentsPermission ) {
+        return {
+          error: true,
+          message: 'Missing team or permissions to log in. Please check with your administrator.'
+        };
+      }
+
       if ( !hasSeniorAgentsPermission ) {
         return {
           error: true,
           message: 'You do not have the required permissions to log in. Please check with your administrator.'
+        };
+      }
+
+      if ( !hasTeam ) {
+        return {
+          error: true,
+          message: 'You are not a part of any team. Please check with your administrator.'
         };
       }
     }
