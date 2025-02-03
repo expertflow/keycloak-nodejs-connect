@@ -1,6 +1,6 @@
 {
   "name": "ef-keycloak-connect",
-  "version": "1.7.5-RC6",
+  "version": "1.7.5-RC8",
   "description": "Node JS keycloak adapter for authentication and authorization.",
   "main": "index.js",
   "scripts": {
