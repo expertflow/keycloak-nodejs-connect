@@ -11,6 +11,8 @@ let memory = new session.MemoryStore();
 
 let keycloakConfig = null;
 let realmRoles = [];
+let previousEvents = []; // Store complete events instead of just IDs
+let isFirstRun = true;
 
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
@@ -23,7 +25,9 @@ const teamsService = new TeamsService();
 const errorService = new ErrorService();
 
 class KeycloakService extends Keycloak {
+
   constructor ( config ) {
+
     keycloakConfig = { ...config };
     super( { store: memory }, keycloakConfig ); //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
     // this.keycloakConfig = config;
@@ -809,7 +813,7 @@ class KeycloakService extends Keycloak {
     if ( !hasRoles && !hasPermissions && !hasTeam ) {
       return {
         error: true,
-        message: 'Missing role, team or, permissions to log in. Please check with your administrator.'
+        message: 'Missing role, team, or permissions to log in. Please check with your administrator.'
       };
     }
 
@@ -3925,6 +3929,84 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+  //start
+  startUserMonitoring = async ( { pollingInterval }, callback ) => {
+
+    return new Promise( ( resolve, reject ) => {
+
+      if ( !keycloakConfig[ "auth-server-url" ] || !keycloakConfig[ "realm" ] ) {
+        reject( {
+          error_message: "Configuration Error: baseUrl and realm are required in config.",
+          error_detail: "Missing required configuration parameters"
+        } );
+        return;
+      }
+
+      const polling = pollingInterval || DEFAULT_POLLING_INTERVAL;
+      let lastCheckTime = Date.now();
+      let monitoringInterval;
+
+      try {
+
+        monitoringInterval = setInterval( async () => {
+
+          try {
+
+            const events = await fetchAdminEvents( keycloakConfig[ "auth-server-url" ], keycloakConfig[ "realm" ], keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
+            const newEvents = getNewEvents( events );
+
+            newEvents.forEach( event => {
+
+              const userData = parseUserData( event.representation );
+
+              if ( userData ) {
+
+                callback( {
+                  time: event.time,
+                  realmId: event.realmId,
+                  authDetails: event.authDetails,
+                  operationType: event.operationType,
+                  resourceType: event.resourceType,
+                  resourcePath: event.resourcePath,
+                  representation: userData
+                } );
+
+              }
+
+            } );
+
+            lastCheckTime = Date.now();
+
+          } catch ( error ) {
+
+            console.error( 'Error in monitoring loop:', error );
+          }
+
+        }, polling );
+
+        // Return the stop function
+        resolve( () => {
+
+          clearInterval( monitoringInterval );
+          previousEvents = [];
+          isFirstRun = true;
+
+          return {
+            message: "Monitoring stopped successfully"
+          };
+
+        } );
+
+      } catch ( error ) {
+
+        reject( {
+          error_message: "Monitoring Start Error: Failed to start user monitoring.",
+          error_detail: error
+        } );
+      }
+    } );
+  };
+
 }
 
 function checkForMissingRole( keycloakRealmRoles, requiredRoles ) {
@@ -3937,6 +4019,105 @@ function checkForMissingRole( keycloakRealmRoles, requiredRoles ) {
 
   return !isMissing;
 }
+
+let parseUserData = ( representation ) => {
+
+  try {
+
+    return JSON.parse( representation );
+  } catch ( error ) {
+
+    return null;
+  }
+};
+
+let extractUserId = ( resourcePath ) => {
+
+  return resourcePath.split( '/' )[ 1 ];
+};
+
+let getNewEvents = ( events ) => {
+
+  if ( isFirstRun ) {
+    previousEvents = events;
+    isFirstRun = false;
+    return events;
+  }
+
+  // If there are new events and we have previous events to compare against
+  if ( events.length > 0 && previousEvents.length > 0 ) {
+
+    // Get the timestamp of our most recent stored event
+    const lastStoredEventTime = previousEvents[ 0 ].time;
+
+    // Filter only events that are newer than our last stored event
+    const genuinelyNewEvents = events.filter( event => event.time > lastStoredEventTime );
+
+    if ( genuinelyNewEvents.length > 0 ) {
+
+      previousEvents = genuinelyNewEvents;
+      return genuinelyNewEvents;
+    }
+  }
+
+  // If no new events, return previous events to maintain state
+  return previousEvents;
+};
+
+let fetchAdminEvents = ( baseUrl, realm, adminUsername, adminPassword ) => {
+
+  return new Promise( async ( resolve, reject ) => {
+
+    let keycloakAdminToken;
+
+    try {
+
+      //Fetching admin token, we pass it in our "Create User" API for authorization
+      keycloakAdminToken = await this.getAccessToken( adminUsername, adminPassword );
+
+    } catch ( err ) {
+
+      let error = await errorService.handleError( err );
+
+      return ( {
+
+        error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the Admin Events component.",
+        error_detail: error
+      } );
+
+    }
+
+    const url = `${baseUrl}admin/realms/${realm}/admin-events`;
+
+    const config = {
+      method: "get",
+      url: url,
+      headers: {
+        Authorization: `Bearer ${keycloakAdminToken.access_token}`,
+        Accept: "application/json",
+        "cache-control": "no-cache"
+      },
+      params: {
+        operationTypes: 'CREATE',
+        resourceTypes: 'USER'
+      }
+    };
+
+    try {
+
+      const response = await requestController.httpRequest( config, false );
+
+      resolve( response.data );
+
+    } catch ( error ) {
+
+      reject( {
+        error_message: "Admin Events Fetch Error: Failed to fetch admin events.",
+        error_detail: error
+      } );
+    }
+  } );
+};
 
 function validateUser( userData ) {
   let schema = Joi.object( {
