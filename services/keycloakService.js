@@ -151,10 +151,11 @@ class KeycloakService extends Keycloak {
           username: user_name,
           password: user_password,
           client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
           grant_type: keycloakConfig.GRANT_TYPE,
         },
       };
+
+      console.log( config );
 
       try {
 
@@ -4024,6 +4025,159 @@ class KeycloakService extends Keycloak {
       }
     } );
   };
+
+  async tenantManagement( realmName, realmConfig = {} ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      let keycloakAdminToken;
+      let realmCreated = false;
+
+      try {
+
+        try {
+
+          //Fetching admin token, we pass it in our "Create User" API for authorization
+          keycloakAdminToken = await this.getAccessToken( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
+
+        } catch ( err ) {
+
+          let error = await errorService.handleError( err );
+
+          reject( {
+
+            error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the Admin Events component.",
+            error_detail: error
+          } );
+
+        }
+
+        let realm = await this.createRealm( realmName, keycloakAdminToken.access_token );
+        realmCreated = true;
+
+      } catch ( err ) {
+
+        reject( err );
+
+      } finally {
+
+        if ( realmCreated && keycloakAdminToken ) {
+
+          try {
+
+            console.log( `Starting partial import for realm: ${realmName}` );
+
+            const realmConfigsImport = await this.importRealmConfigs(
+              realmName,
+              realmConfig,
+              keycloakAdminToken.access_token
+            );
+
+            resolve( {
+              message: "Realm creation and configuration completed successfully",
+              realm: realmName
+            } );
+
+          } catch ( err ) {
+
+            console.log( err );
+            reject( err );
+          }
+
+        }
+
+      }
+
+    } );
+  }
+
+  async createRealm( realmName, adminToken ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      try {
+
+        const URL = `${keycloakConfig[ "auth-server-url" ]}admin/realms`;
+
+        const realmData = {
+          id: realmName,
+          realm: realmName,
+          enabled: true
+        };
+
+        let config = {
+
+          method: "post",
+          url: URL,
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "Content-Type": "application/json",
+          },
+          data: realmData
+        };
+
+        console.log( config );
+
+        let tokenResponse = await requestController.httpRequest( config, false );
+        console.log( `Realm '${realmName}' created successfully.` );
+        resolve( tokenResponse.data );
+
+      } catch ( err ) {
+
+        console.log( err );
+
+        let error = await errorService.handleError( err );
+
+        reject( {
+
+          error_message: "Keycloak Realm Creation Error, Error while creating a realm.",
+          error_detail: error
+        } );
+
+      }
+    } );
+
+  }
+
+  async importRealmConfigs( realmName, realmConfigs, adminToken ) {
+
+    return new Promise( async ( resolve, reject ) => {
+      try {
+
+        const URL = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${realmName}/partialImport`;
+        realmConfigs = {
+          ifRealmExists: 'SKIP',
+          ...realmConfigs
+        }
+
+        let config = {
+
+          method: "post",
+          url: URL,
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "Content-Type": "application/json",
+          },
+          data: realmConfigs
+        };
+
+        console.log( config );
+
+        let partialImportRealm = await requestController.httpRequest( config, false );
+        resolve( partialImportRealm );
+
+      } catch ( err ) {
+
+        let error = await errorService.handleError( err );
+
+        reject( {
+
+          error_message: "Keycloak Realm Creation Error, Error while creating a realm.",
+          error_detail: error
+        } );
+      }
+    } );
+  }
 
 }
 
