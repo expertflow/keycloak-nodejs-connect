@@ -76,13 +76,13 @@ Sample `config` is given below:
   "resource": "keycloak_resource_name",
   "verify-token-audience": false,
   "credentials": {
-    "secret": "461d914e-4b22-4978-8c67-7fe0dfe45d86"
+    "secret": "keycloak_client_secret"
   },
   "use-resource-role-mappings": true,
   "confidential-port": 0,
   "policy-enforcer": {},
   "CLIENT_ID": "keycloak_resource_name",
-  "CLIENT_DB_ID": "461d914e-4b22-4978-8c67-7fe0dfe45d86",
+  "CLIENT_DB_ID": "keycloak_client_secret",
   "GRANT_TYPE": "password",
   "GRANT_TYPE_PAT": "client_credentials",
   "USERNAME_ADMIN": "admin_name",
@@ -192,14 +192,14 @@ This function performs 3 functionalities based on arguments/parameters provided.
 ***Finesse User Auth and Sync with keycloak (Non SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
  ```
-  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
+  authenticateUserViaKeycloak('admin_username', 'admin_password','realm_name',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
  ```
  Finesse User Auth first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
  
 ***Finesse User Auth and Sync with keycloak (SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
    ```
-   authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+   authenticateUserViaKeycloak('admin_username', '',,'realm_name', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'finesse_token')
    ```
   Difference between *Finesse User Auth(SSO)* and *Finesse User Auth(Non SSO)* is that SSO uses finesse_token field while Password field remains ' ', while in Non SSO a Password is sent by user and finesse_token field remains ' '
   
@@ -207,7 +207,7 @@ This function performs 3 functionalities based on arguments/parameters provided.
 For Keycloak User Auth, we use the function as follows:
 
 ```
- authenticateUserViaKeycloak('admin', 'admin','cim','', [],'')
+ authenticateUserViaKeycloak('admin_username', 'admin_password','realm_name','', [],'')
 ```
 
  Keycloak User Auth ask keycloak whether user exists in keycloak realm or not. If user exists it returns a KeyCloakUser object with the user information.
@@ -327,11 +327,11 @@ It takes 5 arguments:
  ##### Example of SSO Finesse Auth:
  
       
-        authenticateFinesse('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+        authenticateFinesse('admin_username', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'finesse_token')
         
  ##### Example of non SSO Finesse Auth:
       
-      authenticateFinesse('johndoe', '12345', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
+      authenticateFinesse('admin_username', 'admin_password', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
 
 ### generateAccessTokenFromRefreshToken(refreshToken)
 
