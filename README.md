@@ -56,7 +56,7 @@ This adapter is extended from keycloak-connect and have functionalities of both 
 Each function returns a promise so
 
 ```
-keycloak.authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'], 'finesseToken').then((e) => {
+keycloak.authenticateUserViaKeycloak('admin_username', 'admin_password','realm_name',`https://${finesse_server_url}:${port}`, ['role1','role2'], 'finesseToken').then((e) => {
     console.log("result :" + (e));
 }).catch((er) => {
     console.log("reject error : " + er);
@@ -76,13 +76,13 @@ Sample `config` is given below:
   "resource": "keycloak_resource_name",
   "verify-token-audience": false,
   "credentials": {
-    "secret": "461d914e-4b22-4978-8c67-7fe0dfe45d86"
+    "secret": "keycloak_client_secret"
   },
   "use-resource-role-mappings": true,
   "confidential-port": 0,
   "policy-enforcer": {},
   "CLIENT_ID": "keycloak_resource_name",
-  "CLIENT_DB_ID": "461d914e-4b22-4978-8c67-7fe0dfe45d86",
+  "CLIENT_DB_ID": "keycloak_client_secret",
   "GRANT_TYPE": "password",
   "GRANT_TYPE_PAT": "client_credentials",
   "USERNAME_ADMIN": "admin_name",
@@ -192,14 +192,14 @@ This function performs 3 functionalities based on arguments/parameters provided.
 ***Finesse User Auth and Sync with keycloak (Non SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
  ```
-  authenticateUserViaKeycloak('admin', 'admin','cim',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
+  authenticateUserViaKeycloak('admin_username', 'admin_password','realm_name',`https://${finesse_server_url}:${port}`, ['role1','role2'],'')
  ```
  Finesse User Auth first authenticates user from finesse, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and return the access_token along with role mapping for newly created user.
  
 ***Finesse User Auth and Sync with keycloak (SSO)***
  For Finesse User Auth (Non SSO) we use the function as follows
    ```
-   authenticateUserViaKeycloak('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+   authenticateUserViaKeycloak('admin_username', '',,'realm_name', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'finesse_token')
    ```
   Difference between *Finesse User Auth(SSO)* and *Finesse User Auth(Non SSO)* is that SSO uses finesse_token field while Password field remains ' ', while in Non SSO a Password is sent by user and finesse_token field remains ' '
   
@@ -207,7 +207,7 @@ This function performs 3 functionalities based on arguments/parameters provided.
 For Keycloak User Auth, we use the function as follows:
 
 ```
- authenticateUserViaKeycloak('admin', 'admin','cim','', [],'')
+ authenticateUserViaKeycloak('admin_username', 'admin_password','realm_name','', [],'')
 ```
 
  Keycloak User Auth ask keycloak whether user exists in keycloak realm or not. If user exists it returns a KeyCloakUser object with the user information.
@@ -327,11 +327,11 @@ It takes 5 arguments:
  ##### Example of SSO Finesse Auth:
  
       
-        authenticateFinesse('johndoe', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'eyJhbGciOiJkaXIiLCJjdHkiOiJKV1QiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..oPk0ttAA')
+        authenticateFinesse('admin_username', '', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], 'finesse_token')
         
  ##### Example of non SSO Finesse Auth:
       
-      authenticateFinesse('johndoe', '12345', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
+      authenticateFinesse('admin_username', 'admin_password', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
 
 ### generateAccessTokenFromRefreshToken(refreshToken)
 
@@ -348,7 +348,7 @@ Response:
     ``` 
     {
       "status": 200,
-      "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJqeEMzZDV5VVZRS1ktY3MwSmhQd29DVzllNjB0VkFPQXBIUDlWUlhsejdBIn0.eyJleHAiOjE2NzgyNzIzNDEsImlhdCI6MTY3ODI3MjEwNSwianRpIjoiNWVkMDBiYzgtNDM1MC00MjQ2LTllOTEtYjE4ZGIyMzc5YTI2IiwiaXNzIjoiaHR0cDovLzE5Mi4xNjguMS4yMDQ6ODA4MC9hdXRoL3JlYWxtcy9EZW1vLUtleWNsb2FrLVJlYWxtIiwiYXVkIjoiYWNjb3VudCIsInN1YiI6IjY5OGRkYWFkLTZkZTYtNDY1YS04Mjg1LTQ4MWI5NjZjMmYxNiIsInR5cCI6IkJlYXJlciIsImF6cCI6ImRlbW8ta2V5Y2xvYWstY2xpZW50Iiwic2Vzc2lvbl9zdGF0ZSI6ImM2NTNmNDk5LWJlNzMtNDIyNS05MGU4LThkYjBjNDkwYTc5MCIsImFjciI6IjEiLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1kZW1vLWtleWNsb2FrLXJlYWxtIiwib2ZmbGluZV9hY2Nlc3MiLCJ1bWFfYXV0aG9yaXphdGlvbiIsImFnZW50LXJvbGUiXX0sInJlc291cmNlX2FjY2VzcyI6eyJhY2NvdW50Ijp7InJvbGVzIjpbIm1hbmFnZS1hY2NvdW50IiwibWFuYWdlLWFjY291bnQtbGlua3MiLCJ2aWV3LXByb2ZpbGUiXX19LCJhdXRob3JpemF0aW9uIjp7InBlcm1pc3Npb25zIjpbeyJyc2lkIjoiNDBhNzg1MjYtNjNiNy00NDcwLThkZWEtZjRlZDViNTUwOTUzIiwicnNuYW1lIjoiRGVmYXVsdCBSZXNvdXJjZSJ9XX0sInNjb3BlIjoiZW1haWwgcHJvZmlsZSIsInNpZCI6ImM2NTNmNDk5LWJlNzMtNDIyNS05MGU4LThkYjBjNDkwYTc5MCIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwibmFtZSI6InphcnlhYiByYXphIiwiYWdlbnRFeHRlbnNpb24iOiI4MDgxLDYwMDEiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJ6YXJ5YWIgcmF6YSIsImdpdmVuX25hbWUiOiJ6YXJ5YWIiLCJmYW1pbHlfbmFtZSI6InJhemEiLCJlbWFpbCI6InphcnlhYkBlbWFpbC5jb20ifQ.Y8NVa0OzAPBwtb6cGyhZxMEyv-o_nTA9ZcvXNcmcEMivqTT0dTE95yNKXYxUQuhTAWE6mPJDwuZ0GuEco7hhxQ6IjjH2j0QwjvqEFFi7KNNdIi-yS4q0elNCjxar8zkHY3Gy8a2d7C_9CQuBN-ernV-JYcmGHENlpmJJpyHfZ5aNkzrcHN5b9qDx2-YZm8pkgFuUv8bwogFFeECzclOlrSGHmaiOI1gp2jkUIw8q23LB8YvzdVg5aHgSDcTKD4gXRrG7C_OQRbCmycOtW4iECLlURnlbbF5Rq4vxzrHjRtBAQmVZ86ITP7yDqEPOWfIxHjODDWWHNL2r7dK8OhNK_g"
+      "access_token": "token_string"
     }
 
  - If the refresh token is invalid then an error message is returned in reponse along with status code 400.
