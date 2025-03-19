@@ -17,12 +17,15 @@ let isFirstRun = true;
 const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
+const CiscoSyncService = require( './ciscoSyncService.js' );
+
 const twilio = require( 'twilio' )
 let twilioClient = null       // will be initialized in constructor using config file
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
 const errorService = new ErrorService();
+const ciscoSyncService = new CiscoSyncService();
 
 class KeycloakService extends Keycloak {
 
@@ -3087,6 +3090,7 @@ class KeycloakService extends Keycloak {
 
   //Check for changes in Finesse User on Each login.
   async updateUser( finObj, keycloakAdminToken, keycloakAuthToken, username, password ) {
+
     /* 
         Check for changes in user role, if user is removed from supervisor role then delete all its Permissions/Policies.
         If supervisor is added to user role then check for the groups it is supervising and create its permissions.
@@ -3764,6 +3768,66 @@ class KeycloakService extends Keycloak {
 
       resolve( [] );
     } );
+  }
+
+  //Sync implementation for teams along with its members (both create and update).
+  async syncImplementation( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      try {
+
+        let adminToken = await this.getAccessToken( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
+        let cxTeams = await ciscoSyncService.syncCiscoData( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL, keycloakConfig, adminToken.access_token );
+
+        resolve( cxTeams );
+
+      } catch ( err ) {
+
+        reject( err );
+      }
+
+    } );
+
+
+    /*
+
+
+    workflow:
+
+    call Cisco teams API to get all the teams, call CX Teams List API to get teams from CX. Compare both and see is there is any additional Cisco Team which doesn't exist on CX or CX team with type "CISCO" that doesn't eixst in Cisco. Create Cisco teams that are missing on CX and delete/disable CX teams that are missing on Cisco side. Also check if team_name of any team is updated on Cisco side and update it on CX. After that, call team detail API to fetch all the members of each team one by one. Then call then "CX API to get members of specific team" to get the members on CX side of same team. Check if there is any member missing or additional member of CX side and make the members exactly as in Cisco side. If a member doesn't exist then create it in keycloak and add it in CX Team corresponding to Cisco. After that, check the data of each member by calling "Keycloak API to get member list" having attribute: "Cisco User" and compare it with users in "Cisco API to fetch user list". if any user is additional in Cisco list then create it in CX and add it in its subsequent list. If any user is additional on keycloak side then disable that user. Similary, update the info exactly to the Cisco user if there is any difference i.e change in role, firstname, lastname, loginname, extension, team, supervised teams "represented by <teams> in user respresentation". There should be both create and update scenarios based on existance or non-existance of team and its members (agents, supervisors)
+
+    Requirements:
+
+    All cisco apis require administrator credentials
+
+    Cisco API to fetch all teams: https://uccx12-5p.ucce.ipcc:8445/finesse/api/Teams?nocache=1680864072911&bypassServerCache=true
+    Cisco API to fetch team detail: https://uccx12-5p.ucce.ipcc:8445/finesse/api/Team/8
+    Cisco API to fetch user detail: https://uccx12-5p.ucce.ipcc:8445/finesse/api/User/SE2606
+    Cisco API to fetch user list: https://uccx12-5p.ucce.ipcc:8445/finesse/api/Users
+
+    CX APIs:
+
+    CX API to get all teams: https://cxtd-qa05.expertflow.com/unified-admin/team
+    CX API to get members of specific team: https://cxtd-qa05.expertflow.com/unified-admin/team/{teamId}/member?limit=25&offset=0
+
+    Keycloak APIs: 
+
+    Keycloak API to get member list:  https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users
+    Keycloak API to create user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users
+    Keycloak API to get details of user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users/{user-id}
+    Keycloak API to get roles of user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/roles
+    Keycloak API to assign roles to user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users/${userId}/role-mappings/realm
+
+    */
+  }
+
+  async createTeamsAndMembers() {
+
+  }
+
+  async updateTeamsAndMembers() {
+
   }
 
   async checkPasswordUpdate( adminToken, userName, password ) {
