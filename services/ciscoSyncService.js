@@ -157,11 +157,13 @@ class CiscoSyncService {
         } );
 
         // Step 4: Disable all the users that are not in Cisco users list and have type: CISCO
-        const disablePromises = usersToDisable.map( user => this.updateKeycloakUser( [], user, keycloakConfig, adminToken ) );
-        await Promise.all( disablePromises );
+        for ( let user of usersToDisable ) {
+
+            await this.updateKeycloakUser( [], user, keycloakConfig, adminToken );
+        }
 
         // Step 5: Process Cisco users (create or update)
-        const updatePromises = ciscoUsers.map( async ( ciscoUser ) => {
+        for ( let ciscoUser of ciscoUsers ) {
 
             const keycloakUser = keycloakUsersMap.get( ciscoUser.username.toLowerCase() );
             const roles = ciscoUser.roles.map( role => role.toLowerCase() );
@@ -183,10 +185,7 @@ class CiscoSyncService {
                 // User doesn't exist in Keycloak, create the user
                 await this.createKeycloakUser( ciscoUser, roles, keycloakConfig, adminToken );
             }
-        } );
-
-        // Wait for all the update operations to complete
-        await Promise.all( updatePromises );
+        }
     }
 
 
@@ -552,214 +551,128 @@ class CiscoSyncService {
 
     }
 
-    // ===================== Assign Users to Teams =====================
-    async assignUsersToTeams( ciscoUsers, ciscoTeams ) {
-        const cxTeams = await this.fetchCXTeams();
-        const cxUsers = await this.fetchCXUsers();
-
-        // Create maps for fast lookup
-        const cxTeamMap = new Map();
-        const cxUserMap = new Map();
-
-        cxTeams.forEach( ( team ) => {
-            if ( team.source === 'CISCO' ) {
-                cxTeamMap.set( team.team_name, team.id ); // Map team name to ID
-            }
-        } );
-
-        cxUsers.forEach( ( user ) => {
-            if ( user.source === 'CISCO' ) {
-                cxUserMap.set( user.user_name, user.id ); // Map user name to ID
-            }
-        } );
-
-        // Assign users to their respective teams in CX
-        for ( let ciscoUser of ciscoUsers ) {
-            const cxUserId = cxUserMap.get( ciscoUser.name );
-
-            if ( cxUserId ) {
-                for ( let ciscoTeamName of ciscoUser.teams ) {
-                    const cxTeamId = cxTeamMap.get( ciscoTeamName );
-
-                    if ( cxTeamId ) {
-                        try {
-                            const data = { user_id: cxUserId, team_id: cxTeamId };
-                            await axios.post( `${this.cxBaseUrl}/user-team`, data );
-                            console.log( `Assigned user ${ciscoUser.name} to team ${ciscoTeamName}` );
-                        } catch ( error ) {
-                            console.error( 'Error assigning user to team:', error );
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // ===================== Main Function to Sync Everything =====================
     async syncCiscoData( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL, keycloakConfig, adminToken ) {
 
-        try {
+        return new Promise( async ( resolve, reject ) => {
 
-            let ciscoUsers = [];
-            // Step 1: Fetch the Cisco and CX data for users and teams
+            try {
 
-            //Fetch Cisco Teams
-            const ciscoTeams = await this.fetchCiscoTeams( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL );
+                let ciscoUsers = [];
+                // Step 1: Fetch the Cisco and CX data for users and teams
 
-            //Fetch Cisco Users
-            ciscoUsers = await this.fetchCiscoUsers( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL );
+                //Fetch Cisco Teams
+                let ciscoTeams = await this.fetchCiscoTeams( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL );
 
-            //Fetch CX Team
-            const cxTeams = await this.fetchCXTeams( keycloakConfig[ "ef-server-url" ] );
-            //console.log( cxTeams );
+                //Fetch Cisco Users
+                ciscoUsers = await this.fetchCiscoUsers( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL );
 
-            /*
-            console.log( "======= Cisco Teams ======" );
-            console.log( ciscoTeams ); 
-            console.log( "======= Cisco Users ======" );
+                //Fetch CX Team
+                let cxTeams = await this.fetchCXTeams( keycloakConfig[ "ef-server-url" ] );
 
-            ciscoUsers.map( user => {
-                console.log( user.supervisedTeams );
-            } );
+                // Fetch Keycloak users
+                let keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig[ "auth-server-url" ], adminToken );
+                const keycloakUsersByRole = await this.fetchKeycloakUsersByRole( keycloakConfig[ "auth-server-url" ], adminToken );
+                const keycloakUsersByPermissionGroups = await this.fetchKeycloakUsersByPermissionGroups( keycloakConfig, adminToken );
 
-            console.log( "======= CX Teams ======" );
-            console.log( cxTeams );
-            */
+                if ( ciscoUsers.length > 0 && ciscoTeams.length > 0 ) {
 
-            let ciscoTeamsIds = ciscoTeams.map( team => Number( team.id ) );
-            const cxTeamsMembers = await this.fetchCXTeamsMembers( keycloakConfig[ "ef-server-url" ], ciscoTeamsIds );
+                    // Step 2: Sync Teams to CX
+                    await this.syncTeamsToCX( ciscoTeams, cxTeams, keycloakConfig[ "ef-server-url" ] );
 
-            //filtration start
+                    // Step 3: Sync Users to CX (only after teams are synced)
+                    await this.syncUsersToCX( ciscoUsers, keycloakUsers, keycloakUsersByRole, keycloakUsersByPermissionGroups, keycloakConfig, adminToken );
 
-            // Helper function to get the CX Team by teamName
-            function getCxTeamByName( teamName ) {
-
-                return cxTeamsMembers.find( ( team ) => team.teamName === teamName );
-            }
-
-            // Arrays to hold the results
-            const agentsToAdd = {};
-            const agentsToRemove = {};
-            const supervisorsToAdd = {};
-            const supervisorsToRemove = {};
-
-            // Check agents
-            ciscoUsers.forEach( ( user ) => {
-
-                const cxTeam = getCxTeamByName( user.team.name );
-
-                if ( cxTeam ) {
-
-                    const cxAgent = cxTeam?.agents?.find(
-                        ( agent ) => agent.user.username === ( user.username ).toLowerCase()
-                    );
-
-                    // If the agent is not already part of the right team, add them
-                    if ( !cxAgent ) {
-                        if ( !agentsToAdd[ cxTeam.teamName ] ) {
-                            agentsToAdd[ cxTeam.teamName ] = [];
+                    //Once users are synced, we fetch updated keycloak users list.
+                    keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig[ "auth-server-url" ], adminToken );
+                    console.log( keycloakUsers.map( user => {
+                        return {
+                            id: user.id,
+                            username: user.username
                         }
-                        agentsToAdd[ cxTeam.teamName ].push( user );
-                    }
+                    } ) );
 
-                    // Remove the agent if they are part of the wrong team
-                    cxTeamsMembers.forEach( ( team ) => {
+                    const ciscoUsernames = ciscoUsers.map( user => user.username.toLowerCase() );
+                    let uniqueKeycloakUsers = keycloakUsers.filter( user => !ciscoUsernames.includes( user.username.toLowerCase() ) );
 
-                        if ( team.teamName !== user.team.name ) {
-
-
-                            const agentInWrongTeam = team?.agents?.find(
-                                ( agent ) => agent.user.username === ( user.username ).toLowerCase()
-                            );
-
-                            if ( agentInWrongTeam ) {
-
-                                if ( !agentsToRemove[ team.teamName ] ) {
-                                    agentsToRemove[ team.teamName ] = [];
-                                }
-                                agentsToRemove[ team.teamName ].push( user );
-                            }
+                    uniqueKeycloakUsers = uniqueKeycloakUsers.map( user => {
+                        return {
+                            id: user.id,
+                            username: user.username
                         }
                     } );
+
+                    // Step 4: Assign Users to Teams
+                    let ciscoTeamsIds = ciscoTeams.map( team => Number( team.id ) );
+                    const cxTeamsMembers = await this.fetchCXTeamsMembers( keycloakConfig[ "ef-server-url" ], ciscoTeamsIds );
+
+
+                    let { agentsToAdd, agentsToRemove, supervisorsToAdd,
+                        supervisorsToRemove } = this.addOrRemoveAgentsOrSupervisors( ciscoUsers, cxTeamsMembers, keycloakUsers, uniqueKeycloakUsers );
+
+                    const { cxAgents, cxSupervisors } = this.mapTeamMembersToKeycloak( ciscoTeams, cxTeamsMembers, uniqueKeycloakUsers );
+
+
+                    //Remove Agents from wrong Teams (both CX and Cisco)
+                    ( Object.keys( agentsToRemove ).length > 0 ) && await this.removeAgentsFromTeams( keycloakConfig[ "ef-server-url" ], agentsToRemove );
+                    ( Object.keys( cxAgents ).length > 0 ) && await this.removeAgentsFromTeams( keycloakConfig[ "ef-server-url" ], cxAgents );
+
+                    //Add Agents To Team
+                    ( Object.keys( agentsToAdd ).length > 0 ) && await this.addAgentsToTeams( keycloakConfig[ "ef-server-url" ], agentsToAdd );
+
+                    //Remove Primary Supervisors from wrong Team (both CX and Cisco)
+                    ( Object.keys( supervisorsToRemove.primary ).length > 0 ) && await this.removePrimarySupervisorsFromTeams( keycloakConfig[ "ef-server-url" ], supervisorsToRemove.primary );
+
+                    ( Object.keys( cxSupervisors.primary ).length > 0 ) && await this.removePrimarySupervisorsFromTeams( keycloakConfig[ "ef-server-url" ], cxSupervisors.primary );
+
+                    //Remove Secondary Supervisors from wrong Team (both CX and Cisco)
+                    ( Object.keys( supervisorsToRemove.secondary ).length > 0 ) && await this.removeSecondarySupervisorsFromTeams( keycloakConfig[ "ef-server-url" ], supervisorsToRemove.secondary );
+
+                    ( Object.keys( cxSupervisors.secondary ).length > 0 ) && await this.removeSecondarySupervisorsFromTeams( keycloakConfig[ "ef-server-url" ], cxSupervisors.secondary );
+
+                    //Add Primary Supervisors to Team
+                    ( Object.keys( supervisorsToAdd.primary ).length > 0 ) && await this.addPrimarySupervisorsToTeams( keycloakConfig[ "ef-server-url" ], supervisorsToAdd.primary );
+
+                    //Add Secondary Supervisors To Team
+                    ( Object.keys( supervisorsToAdd.secondary ).length > 0 ) && await this.addSecondarySupervisorsToTeams( keycloakConfig[ "ef-server-url" ], supervisorsToAdd.secondary );
+
+                    resolve( 'Data synchronization complete!' );
+
+                } else {
+
+                    reject( {
+
+                        error_message: "Error occurred while Syncing Cisco Data in Keycloak and CX",
+                        error_detail: "There are no Teams or Users on Cisco Side, Please add Teams/Users to Sync on CX"
+                    } );
                 }
-            } );
 
-            // Check supervisors
-            ciscoUsers.forEach( ( user ) => {
+            } catch ( er ) {
 
-                user?.supervisedTeams?.forEach( ( supervisedTeam ) => {
+                if ( er.error_message ) {
 
-                    const cxTeam = getCxTeamByName( supervisedTeam?.name );
+                    reject( {
 
-                    if ( cxTeam ) {
-                        const cxSupervisor = cxTeam?.supervisors?.find(
-                            ( supervisor ) => supervisor?.user?.username === ( user?.username ).toLowerCase()
-                        );
+                        error_message: "Error occurred while Syncing Cisco Data in Keycloak and CX",
+                        error_detail: er
+                    } );
 
-                        // Add supervisor to correct team if not already there
-                        if ( !cxSupervisor ) {
-                            if ( !supervisorsToAdd[ supervisedTeam.name ] ) {
-                                supervisorsToAdd[ supervisedTeam.name ] = [];
-                            }
-                            supervisorsToAdd[ supervisedTeam.name ].push( user );
-                        }
-                    }
-                } );
+                } else {
 
-                // For each CX Team
-                cxTeamsMembers.forEach( ( cxTeam ) => {
+                    let error = await errorService.handleError( er );
 
-                    // Check if the user is a supervisor in the CX Team
-                    const cxSupervisor = cxTeam?.supervisors?.find(
-                        ( supervisor ) => supervisor?.user?.username === ( user?.username ).toLowerCase()
-                    );
+                    reject( {
 
-                    // If the user is a supervisor in a team they shouldn't be managing, remove them
-                    if ( cxSupervisor && !user?.supervisedTeams?.some( supervisedTeam => supervisedTeam.name === cxTeam.teamName ) ) {
-                        // If the user is not supposed to supervise this team, add them to supervisorsToRemove
-                        if ( !supervisorsToRemove[ cxTeam.teamName ] ) {
-                            supervisorsToRemove[ cxTeam.teamName ] = [];
-                        }
-                        supervisorsToRemove[ cxTeam.teamName ].push( user );
-                    }
-
-                } );
-            } );
-
-            // Output the results
-            console.log( 'Agents to Add:', agentsToAdd );
-            console.log( 'Agents to Remove:', agentsToRemove );
-            console.log( 'Supervisors to Add:', supervisorsToAdd );
-            console.log( 'Supervisors to Remove:', supervisorsToRemove );
+                        error_message: "Error occurred while Syncing Cisco Data in Keycloak and CX",
+                        error_detail: error
+                    } );
+                }
 
 
+            }
 
-            //filtration end
-
-
-
-
-            // Fetch Keycloak users
-            const keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig[ "auth-server-url" ], adminToken );
-            const keycloakUsersByRole = await this.fetchKeycloakUsersByRole( keycloakConfig[ "auth-server-url" ], adminToken );
-            const keycloakUsersByPermissionGroups = await this.fetchKeycloakUsersByPermissionGroups( keycloakConfig, adminToken );
-
-            ciscoUsers = ciscoUsers.slice( 0, 2 );
-
-            // Step 2: Sync Teams to CX
-            await this.syncTeamsToCX( ciscoTeams, cxTeams, keycloakConfig[ "ef-server-url" ] );
-
-            // Step 3: Sync Users to CX (only after teams are synced)
-            //await this.syncUsersToCX( ciscoUsers, keycloakUsers, keycloakUsersByRole, keycloakUsersByPermissionGroups, keycloakConfig, adminToken );
-
-            // Step 4: Assign Users to Teams
-            //await this.assignUsersToTeams( ciscoUsers, ciscoTeams );
-
-            console.log( 'Data synchronization complete!' );
-        } catch ( error ) {
-
-            console.error( 'Error in Cisco data synchronization:', error );
-        }
+        } );
     }
 
     // ===================== Helper Functions =====================
@@ -867,7 +780,6 @@ class CiscoSyncService {
         return new Promise( async ( resolve, reject ) => {
 
             teamIdsArr = teamIdsArr.join( ',' );
-            console.log( teamIdsArr );
             let URL = `${cxURL}team/member?teamIds=${teamIdsArr}`;
 
             let config = {
@@ -878,9 +790,6 @@ class CiscoSyncService {
             try {
 
                 let tokenResponse = await requestController.httpRequest( config, true );
-
-                // Filter the teams to only include those with source: "CISCO"
-                //let filteredTeams = tokenResponse.data.filter( team => team.source === 'CISCO' );
 
                 resolve( tokenResponse.data );
 
@@ -1374,6 +1283,458 @@ class CiscoSyncService {
 
         } );
 
+    }
+
+    // ===================== Team Members Sync Helper Functions ===============
+    addOrRemoveAgentsOrSupervisors( ciscoUsers, cxTeamsMembers, keycloakUsers ) {
+
+        // Arrays to hold the results
+        const agentsToAdd = {};
+        const agentsToRemove = {};
+        const supervisorsToAdd = { primary: {}, secondary: {} };
+        const supervisorsToRemove = { primary: {}, secondary: {} };
+
+        // To track users already marked for removal
+        const usersAlreadyMarkedForRemoval = new Set();
+
+        // Check agents
+        for ( let user of ciscoUsers ) {
+
+            const cxTeam = this.getCxTeamByName( user?.team?.name, cxTeamsMembers );
+
+            if ( cxTeam ) {
+
+                const cxAgent = cxTeam?.agents?.find(
+                    ( agent ) => agent?.user?.username === ( user?.username ).toLowerCase()
+                );
+
+                // If the agent is not already part of the right team, add them
+                if ( !cxAgent ) {
+                    if ( !agentsToAdd[ cxTeam?.teamId ] ) {
+                        agentsToAdd[ cxTeam?.teamId ] = [];
+                    }
+                    agentsToAdd[ cxTeam?.teamId ].push( user );
+                }
+
+                // Remove the agent if they are part of the wrong team
+                cxTeamsMembers.forEach( ( team ) => {
+
+                    if ( team?.teamName !== user?.team?.name ) {
+
+                        const agentInWrongTeam = team?.agents?.find(
+                            ( agent ) => agent.user.username === ( user.username ).toLowerCase()
+                        );
+
+                        if ( agentInWrongTeam ) {
+
+                            if ( !agentsToRemove[ team.teamId ] ) {
+                                agentsToRemove[ team.teamId ] = [];
+                            }
+                            agentsToRemove[ team.teamId ].push( user );
+                        }
+                    }
+                } );
+            }
+        }
+
+        // Check supervisors
+        for ( let user of ciscoUsers ) {
+
+            user?.supervisedTeams?.forEach( ( supervisedTeam ) => {
+
+                const cxTeam = this.getCxTeamByName( supervisedTeam?.name, cxTeamsMembers );
+
+                if ( cxTeam ) {
+
+                    const cxSupervisor = cxTeam?.supervisors?.find(
+                        ( supervisor ) => supervisor?.user?.username === ( user?.username ).toLowerCase()
+                    );
+
+                    // Add supervisor to correct team if not already there
+                    if ( !cxSupervisor ) {
+
+                        // Check if there's already a primary supervisor, if not add this user as primary
+                        const primarySupervisor = cxTeam.supervisors?.find(
+                            ( supervisor ) => supervisor?.user && supervisor.type === 'primary-supervisor'
+                        );
+
+                        let supervisorType = ( primarySupervisor || supervisorsToAdd.primary.hasOwnProperty( supervisedTeam?.id ) ) ? 'secondary' : 'primary';
+
+                        if ( !supervisorsToAdd[ supervisorType ][ supervisedTeam.id ] ) {
+
+                            supervisorsToAdd[ supervisorType ][ supervisedTeam.id ] = [];
+                        }
+
+                        let cxUser = keycloakUsers.find( keycloakUser => keycloakUser.username === ( user?.username ).toLowerCase() );
+                        cxUser.ciscoTeam = supervisedTeam.name;
+
+                        supervisorsToAdd[ supervisorType ][ supervisedTeam.id ].push( cxUser );
+                    }
+                }
+            } );
+
+
+            // For each CX Team, check if user is a supervisor
+            cxTeamsMembers.forEach( ( cxTeam ) => {
+
+                // Check if the user is a supervisor in the CX Team
+                const cxSupervisor = cxTeam?.supervisors?.find(
+                    ( supervisor ) => supervisor?.user?.username === ( user?.username ).toLowerCase()
+                );
+
+                // If the user is a supervisor in a team they shouldn't be managing, remove them
+                if ( cxSupervisor && !user?.supervisedTeams?.some( ( supervisedTeam ) => supervisedTeam.name === cxTeam.teamName ) ) {
+
+                    // Determine if the supervisor is primary or secondary
+                    const supervisorType = cxSupervisor.type === 'primary-supervisor' ? 'primary' : 'secondary';
+
+                    if ( !supervisorsToRemove[ supervisorType ][ cxTeam.teamId ] ) {
+
+                        supervisorsToRemove[ supervisorType ][ cxTeam.teamId ] = [];
+                    }
+
+                    let cxUser = keycloakUsers.find( keycloakUser => keycloakUser.username === ( user?.username ).toLowerCase() );
+                    supervisorsToRemove[ supervisorType ][ cxTeam.teamId ].push( cxUser );
+                }
+            } );
+        }
+
+        // Output the results
+
+        return {
+            agentsToAdd: agentsToAdd,
+            agentsToRemove: agentsToRemove,
+            supervisorsToAdd: supervisorsToAdd,
+            supervisorsToRemove: supervisorsToRemove
+        }
+
+    }
+
+    async addAgentsToTeams( cxURL, agentsToAdd ) {
+
+        return new Promise( async ( resolve, reject ) => {
+
+
+            for ( let teamId in agentsToAdd ) {
+
+                if ( agentsToAdd.hasOwnProperty( teamId ) ) {
+
+
+                    // Extract usernames and convert them to lowercase
+                    const usernames = agentsToAdd[ teamId ].map( item => ( item.username ).toLowerCase() );
+
+                    // Prepare the data object for the API request
+                    const requestData = {
+                        type: "agent",
+                        usernames: usernames
+                    };
+
+                    // Set the URL for the API request
+                    const URL = cxURL + `team/${teamId}/member`;
+
+                    // Set up the configuration for the API request
+                    let config = {
+                        method: 'post',
+                        url: URL,
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        data: requestData
+                    };
+
+                    try {
+
+                        await requestController.httpRequest( config, false );
+
+                    }
+                    catch ( er ) {
+
+                        console.log( er.response );
+                        reject( er.status );
+                    }
+                }
+            }
+
+            resolve( 'Agents Added...' );
+        } )
+    }
+
+    async removeAgentsFromTeams( cxURL, agentsToRemove ) {
+
+        return new Promise( async ( resolve, reject ) => {
+
+
+            for ( let teamId in agentsToRemove ) {
+
+                if ( agentsToRemove.hasOwnProperty( teamId ) ) {
+
+
+                    // Extract usernames and convert them to lowercase
+                    let usernames = agentsToRemove[ teamId ].map( item => ( item.username ).toLowerCase() );
+                    usernames = usernames.join( ',' );
+
+                    // Set the URL for the API request
+                    const URL = cxURL + `team/${teamId}/member?type=agent&usernames=${usernames}`;
+
+                    // Set up the configuration for the API request
+                    let config = {
+                        method: 'delete',
+                        url: URL
+                    };
+
+                    try {
+
+                        await requestController.httpRequest( config, false );
+
+                    }
+                    catch ( er ) {
+
+                        console.log( er.response );
+                        reject( er.status );
+                    }
+                }
+            }
+
+            resolve( 'Agents Removed...' );
+        } )
+    }
+
+    async addPrimarySupervisorsToTeams( cxURL, primarySupervisorsToAdd ) {
+
+        return new Promise( async ( resolve, reject ) => {
+
+            for ( let teamId in primarySupervisorsToAdd ) {
+
+                if ( primarySupervisorsToAdd.hasOwnProperty( teamId ) ) {
+
+                    // Extract usernames and convert them to lowercase
+                    const userId = primarySupervisorsToAdd[ teamId ].map( item => item.id );
+
+                    // Prepare the data object for the API request
+                    const requestData = {
+
+                        supervisor_Id: userId[ 0 ]
+                    };
+
+                    // Set the URL for the API request
+                    const URL = cxURL + `team/${teamId}/supervisor`;
+
+                    // Set up the configuration for the API request
+                    let config = {
+                        method: 'put',
+                        url: URL,
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        data: requestData
+                    };
+
+                    try {
+
+                        await requestController.httpRequest( config, false );
+
+                    }
+                    catch ( er ) {
+
+                        console.log( er.response );
+                        reject( er.status );
+                    }
+                }
+            }
+
+            resolve( 'Secondary Supervisors Added...' );
+        } )
+    }
+
+    async addSecondarySupervisorsToTeams( cxURL, secondarySupervisorsToAdd ) {
+
+        return new Promise( async ( resolve, reject ) => {
+
+
+            for ( let teamId in secondarySupervisorsToAdd ) {
+
+                if ( secondarySupervisorsToAdd.hasOwnProperty( teamId ) ) {
+
+
+                    // Extract usernames and convert them to lowercase
+                    const usernames = secondarySupervisorsToAdd[ teamId ].map( item => ( item.username ).toLowerCase() );
+
+                    // Prepare the data object for the API request
+                    const requestData = {
+                        type: "secondary-supervisor",
+                        usernames: usernames
+                    };
+
+                    // Set the URL for the API request
+                    const URL = cxURL + `team/${teamId}/member`;
+
+                    // Set up the configuration for the API request
+                    let config = {
+                        method: 'post',
+                        url: URL,
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        data: requestData
+                    };
+
+                    try {
+
+                        await requestController.httpRequest( config, false );
+
+                    }
+                    catch ( er ) {
+
+                        console.log( er.response );
+                        reject( er.status );
+                    }
+                }
+            }
+
+            resolve( 'Secondary Supervisors Added...' );
+        } )
+    }
+
+    async removePrimarySupervisorsFromTeams( cxURL, primarySupervisorsToRemove ) {
+
+        return new Promise( async ( resolve, reject ) => {
+
+
+            for ( let teamId in primarySupervisorsToRemove ) {
+
+
+                // Set the URL for the API request
+                const URL = cxURL + `team/${teamId}/supervisor`;
+
+                // Set up the configuration for the API request
+                let config = {
+                    method: 'delete',
+                    url: URL
+                };
+
+                try {
+
+                    await requestController.httpRequest( config, false );
+
+                }
+                catch ( er ) {
+
+                    console.log( er.response );
+                    reject( er.status );
+                }
+
+            }
+
+            resolve( 'Primary Supervisors Removed...' );
+        } )
+    }
+
+    async removeSecondarySupervisorsFromTeams( cxURL, secondarySupervisorsToRemove ) {
+
+        return new Promise( async ( resolve, reject ) => {
+
+
+            for ( let teamId in secondarySupervisorsToRemove ) {
+
+                if ( secondarySupervisorsToRemove.hasOwnProperty( teamId ) ) {
+
+
+                    // Extract usernames and convert them to lowercase
+                    let usernames = secondarySupervisorsToRemove[ teamId ].map( item => ( item.username ).toLowerCase() );
+                    usernames = usernames.join( ',' );
+
+                    // Set the URL for the API request
+                    const URL = cxURL + `team/${teamId}/member?type=secondary-supervisor&usernames=${usernames}`;
+
+                    // Set up the configuration for the API request
+                    let config = {
+                        method: 'delete',
+                        url: URL
+                    };
+
+                    try {
+
+                        await requestController.httpRequest( config, false );
+
+                    }
+                    catch ( er ) {
+
+                        console.log( er.response );
+                        reject( er.status );
+                    }
+                }
+            }
+
+            resolve( 'Secondary Supervisors Added...' );
+        } )
+    }
+
+    mapTeamMembersToKeycloak( CiscoTeams, CXTeamMembers, UniqueKeycloakMembers ) {
+        // Initialize an object to store the result
+        let cxAgents = {};
+        let cxSupervisors = { primary: {}, secondary: {} };
+
+        // Loop through each Cisco team
+        CiscoTeams.forEach( ciscoTeam => {
+            const ciscoTeamId = ciscoTeam.id;
+
+            // Find the corresponding CX Team for this Cisco Team
+            const cxTeam = CXTeamMembers.find( team => team.teamId === ciscoTeamId );
+
+            if ( cxTeam ) {
+
+                // Check agents
+                cxTeam?.agents?.forEach( agent => {
+                    // Find the corresponding Keycloak user based on the agent's username
+                    const keycloakAgent = UniqueKeycloakMembers.find( user => user?.username === agent?.user?.username );
+                    if ( keycloakAgent ) {
+
+                        if ( !cxAgents[ ciscoTeamId ] ) {
+                            cxAgents[ ciscoTeamId ] = []
+                        }
+
+                        cxAgents[ ciscoTeamId ].push( {
+                            id: keycloakSupervisor?.id,
+                            username: keycloakSupervisor?.username
+                        } );
+                    }
+                } );
+
+                // Check supervisors
+                cxTeam?.supervisors?.forEach( supervisor => {
+                    // Find the corresponding Keycloak user based on the supervisor's username
+                    const keycloakSupervisor = UniqueKeycloakMembers.find( user => user?.username === supervisor?.user?.username );
+
+                    if ( keycloakSupervisor ) {
+
+                        // Determine if the supervisor is primary or secondary
+                        const supervisorType = supervisor?.type === 'primary-supervisor' ? 'primary' : 'secondary';
+
+                        if ( !cxSupervisors[ supervisorType ][ ciscoTeamId ] ) {
+
+                            cxSupervisors[ supervisorType ][ ciscoTeamId ] = [];
+                        }
+
+                        cxSupervisors[ supervisorType ][ ciscoTeamId ].push( {
+                            id: keycloakSupervisor?.id,
+                            username: keycloakSupervisor?.username
+                        } );
+                    }
+                } );
+            }
+        } );
+
+        return {
+            cxAgents: cxAgents,
+            cxSupervisors: cxSupervisors
+        };
+    }
+
+
+    // Helper function to get the CX Team by teamName
+    getCxTeamByName( teamName, cxTeamsMembers ) {
+
+        return cxTeamsMembers.find( ( team ) => team.teamName === teamName );
     }
 
     async maskCredentials( username, password ) {
