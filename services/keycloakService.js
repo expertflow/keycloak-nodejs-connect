@@ -50,7 +50,7 @@ class KeycloakService extends Keycloak {
       let attributesFromToken = token.keycloak_User.attributes
 
       if ( is2FAEnabled ) {     // if 2FA is enabled then running the 2FA flow
-        if ( !twoFAChannel || twoFAChannel == '' || ( twoFAChannel !== 'app' && twoFAChannel !== 'sms' ) ) {
+        if ( !twoFAChannel || twoFAChannel == '' || ( twoFAChannel !== 'app' && twoFAChannel !== 'sms' && twoFAChannel !== 'rsa') ) {
           return Promise.reject( { status: 400, error_message: 'twoFAChannel parameter is empty or invalid' } )
         }
 
@@ -62,13 +62,31 @@ class KeycloakService extends Keycloak {
         // checking if user attributes in keycloak exist or not to confirm 2FA registration
         if ( !attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false' ) {
 
+          // getting admin access token to update the user attributes for RSA & Auht Apps
+          const adminData = await this.getAccessToken(keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN);
+          const adminToken = adminData.access_token;
+          
           // appending extra information regarding 2FA in response object
           tempToken.is2FARegistered = false
           tempToken.twoFAChannel = twoFAChannel
           tempToken.message = "2FA registration required"
 
+          // handling RSA authenticator scenario exclusively
+          if(twoFAChannel === 'rsa'){
+            tempToken.is2FARegistered = true;
+            tempToken.message = "OTP required.";
+
+            //updating user attributes for RSA MFA
+            let newAttributes = {};
+            if (attributesFromToken) newAttributes = attributesFromToken;
+            newAttributes.twoFAChannel = "rsa";
+            newAttributes.is2FARegistered = true;
+
+            await this.updateUserAttributes(adminToken, token.keycloak_User.id, newAttributes);
+          }
+
           // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
-          if ( twoFAChannel == 'app' ) {
+          else if ( twoFAChannel == 'app' ) {
             // QR Code and Secret Code generation based on username
             const qrSetup = await this.getQRCode( user_name )
             if ( qrSetup ) {
@@ -76,10 +94,6 @@ class KeycloakService extends Keycloak {
               tempToken.qrImage = qrSetup.image
             }
             else return Promise.reject( { error: 404, error_message: 'Error occurred while generating QR code.' } )
-
-            // getting admin access token to update the user attributes
-            const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
-            const adminToken = adminData.access_token
 
             //updating user attributes for 2FA
             let newAttributes = {}
@@ -95,7 +109,7 @@ class KeycloakService extends Keycloak {
         else if ( attributesFromToken.is2FARegistered[ 0 ] == 'true' ) {     // if user has already registered for 2FA
           tempToken.is2FARegistered = true
           tempToken.twoFAChannel = attributesFromToken.twoFAChannel[ 0 ]
-          tempToken.message = "OTP required"
+          tempToken.message = "OTP required."
 
           if ( attributesFromToken.twoFAChannel[ 0 ] == 'sms' ) {
             if ( !attributesFromToken.phoneNumber ) {
@@ -489,6 +503,47 @@ class KeycloakService extends Keycloak {
         }
       }
 
+      // running OTP validation flow for RSA Authenticator
+      else if(userAttributes.twoFAChannel[0]==='rsa'){
+        // setting up SecurID API for MFA
+        let URL = keycloakConfig.RSA_Server_URL + "mfa/v1_1/authn/initialize";
+
+        // configuring headers & payload
+        let config = {
+          method: "post",
+          url: URL,
+          headers: {
+            "Content-Type": "application/json",
+            "client-key": keycloakConfig.RSA_Client_Key,
+          },
+          data: {
+            clientId: keycloakConfig.RSA_Client_ID,
+            subjectName: username,
+            subjectCredentials: [
+              {
+                methodId: "SECURID",
+                collectedInputs: [{ name: "SECURID", value: otpToValidate }],
+              },
+            ],
+            context: {
+              authnAttemptId: "",
+              messageId: username + "2faAttempt",
+              inResponseTo: "",
+            },
+          },
+        };
+
+        try {
+          let verificationStatus = await requestController.httpRequest( config, true );
+          if(verificationStatus.status !== 200 || !verificationStatus.data || (verificationStatus.data.attemptResponseCode !== 'SUCCESS' && verificationStatus.data.attemptReasonCode !== 'CREDENTIAL_VERIFIED')){
+            throw false
+          }
+        } 
+        catch (err) {
+          return Promise.reject({error: 400, error_message: "Error occured while verifying token from RSA SecurID. This may be due to invalid token, invalid configurations or some issue with SecurID."})
+        }
+
+      }
     }
     else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
 
