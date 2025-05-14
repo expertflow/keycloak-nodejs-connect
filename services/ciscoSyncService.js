@@ -57,8 +57,11 @@ class CiscoSyncService {
 
                 reject( {
 
-                    error_message: "Finesse Team Sync Error: Error occured while creating cx core team.",
-                    error_detail: error
+                    error_message: `Finesse Team Sync Error: Error occured while creating cx core team. TEAM ID: ${ciscoTeam.id}, TEAM NAME: ${ciscoTeam.name}`,
+                    error_detail: ( error?.status && error?.status == 409 ) ? {
+                        status: 409,
+                        reason: `CX Team ${ciscoTeam.name} already exists against this Cisco Team with different ID, Causing Conflict.`
+                    } : error
                 } );
             }
         } );
@@ -119,9 +122,6 @@ class CiscoSyncService {
                 cxTeamMap.set( team.team_Id, team );
             }
         } );
-
-        //testing with only 2 teams for now
-        //ciscoTeams = ciscoTeams.slice( 0, 2 );
 
         // Iterate over Cisco teams and sync them with CX
         for ( let ciscoTeam of ciscoTeams ) {
@@ -1442,8 +1442,6 @@ class CiscoSyncService {
             } );
         }
 
-        // Output the results
-
         return {
             agentsToAdd: agentsToAdd,
             agentsToRemove: agentsToRemove,
@@ -1737,8 +1735,8 @@ class CiscoSyncService {
                         }
 
                         cxAgents[ ciscoTeamId ].push( {
-                            id: keycloakSupervisor?.id,
-                            username: keycloakSupervisor?.username
+                            id: keycloakAgent?.id,
+                            username: keycloakAgent?.username
                         } );
                     }
                 } );
