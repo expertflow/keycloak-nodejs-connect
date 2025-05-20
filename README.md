@@ -40,6 +40,7 @@ This adapter is extended from keycloak-connect and have functionalities of both 
   - getRealmRoles
   - assignRoleToUser
   - authenticateFinesse
+  - createRealmAsTenant
   
 ```
 ### Example
@@ -98,7 +99,9 @@ Sample `config` is given below:
   "ef-server-url": "https://<cx instance fqdn>/unified-admin/",
   "FINESSE_USERNAME_ADMIN": "<cisco admin username>",
   "FINESSE_PASSWORD_ADMIN": "<cisco admin username>",
-  "SYNC_AGENT_PASSWORD": "<qm sync agent/supervisor password>"
+  "SYNC_AGENT_PASSWORD": "<qm sync agent/supervisor password>",
+  "MASTER_USERNAME": "master_admin_username",
+  "MASTER_PASSWORD": "master_admin_password"
 }
 ```
 Here is the definition of each property defined in config file/object.
@@ -129,6 +132,8 @@ Here is the definition of each property defined in config file/object.
 - **FINESSE_PASSWORD_ADMIN:** Finesse Administrator Password of instance in use.
 - **FINESSE_URL**: Finesse Instance URL currently in use.
 - **SYNC_AGENT_PASSWORD**: Password for Users being synced to Keycloak/CX.
+- **MASTER_USERNAME**: Keycloak master admin username.
+- **MASTER_PASSWORD**: Keycloak master password username.
 
 For using keycloak-connect features:
 ```js
@@ -419,6 +424,16 @@ This function returns the list of all the available roles in keycloak realm.
 It takes a signle argument:
 
    - adminToken: Admin token is required to authorize the list of roles to return.
+
+### createRealmAsTenant(tenantName, realmFile, authzConfigFilePath)
+
+This function creates a new Realm as a Teant in keycloak and also import its permission/policies based on configurations given in realm and authz files.
+
+It takes 3 arguments: 
+
+   - tenantName: Name of realm that will be created as tenant in keycloak.
+   - realmFile: Realm configurations given in a JSON format, against which tenant will be created in keycloak, this is the path of file.
+   - authzConfigFilePath: Authz configurations given in a JSON format, against which policies/permissions will be created in keycloak, this is the path of file.
 
 ### authenticateFinesse(username, password, finesseUrl, userRoles, finesseToken)
 
