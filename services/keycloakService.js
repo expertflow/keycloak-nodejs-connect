@@ -6,11 +6,9 @@ const qrcode = require( "qrcode" );
 const speakeasy = require( 'speakeasy' )
 const parseXMLString = require( "xml2js" ).parseString;
 
-
 let requestController = require( "../controller/requestController.js" );
 let memory = new session.MemoryStore();
 
-let keycloakConfig = null;
 let realmRoles = [];
 let previousEvents = []; // Store complete events instead of just IDs
 let isFirstRun = true;
@@ -32,11 +30,11 @@ class KeycloakService extends Keycloak {
 
   constructor ( config ) {
 
-    keycloakConfig = { ...config };
-    super( { store: memory }, keycloakConfig ); //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
-    // this.keycloakConfig = config;
-    if ( keycloakConfig.TWILIO_SID && keycloakConfig.TWILIO_AUTH_TOKEN ) {
-      twilioClient = twilio( keycloakConfig.TWILIO_SID, keycloakConfig.TWILIO_AUTH_TOKEN )
+    super( { store: memory }, { ...config } ); //initialising keycloak-connect   //Keycloak = new Keycloak({store: memory}, config);
+    this.keycloakConfig = { ...config };
+
+    if ( this.keycloakConfig.TWILIO_SID && this.keycloakConfig.TWILIO_AUTH_TOKEN ) {
+      twilioClient = twilio( this.keycloakConfig.TWILIO_SID, this.keycloakConfig.TWILIO_AUTH_TOKEN )
     }
   }
 
@@ -79,7 +77,7 @@ class KeycloakService extends Keycloak {
             else return Promise.reject( { error: 404, error_message: 'Error occurred while generating QR code.' } )
 
             // getting admin access token to update the user attributes
-            const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+            const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN )
             const adminToken = adminData.access_token
 
             //updating user attributes for 2FA
@@ -141,7 +139,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -154,9 +152,9 @@ class KeycloakService extends Keycloak {
         data: {
           username: user_name,
           password: user_password,
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
-          grant_type: keycloakConfig.GRANT_TYPE,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
         },
       };
 
@@ -182,7 +180,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -196,10 +194,10 @@ class KeycloakService extends Keycloak {
         data: {
           username: user_name,
           password: user_password,
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
           grant_type: "urn:ietf:params:oauth:grant-type:uma-ticket",
-          audience: keycloakConfig.CLIENT_ID
+          audience: this.keycloakConfig.CLIENT_ID
         },
       };
 
@@ -225,7 +223,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
 
       let config = {
         method: "post",
@@ -236,9 +234,9 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded"
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
-          grant_type: keycloakConfig.GRANT_TYPE,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
           token: access_token
         },
       };
@@ -263,7 +261,7 @@ class KeycloakService extends Keycloak {
 
   // function for getting user details (and extracting attributes)
   async getUserDetails( adminToken, username ) {
-    let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
+    let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
     let config = {
       method: "get",
       url: URL,
@@ -304,7 +302,7 @@ class KeycloakService extends Keycloak {
 
   // function for updating user attributes in KeyCloak for 2FA registration
   async updateUserAttributes( adminToken, userId, attributesToUpdate ) {
-    let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId;
+    let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId;
     let config = {
       method: "put",
       url: URL,
@@ -340,7 +338,7 @@ class KeycloakService extends Keycloak {
 
     let userObjectToBeReturned = { username: username }
 
-    const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+    const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN )
     const adminToken = adminData.access_token
 
     let userObject = await this.getUserDetails( adminToken, username )
@@ -408,7 +406,7 @@ class KeycloakService extends Keycloak {
     }
 
     try {
-      await twilioClient.verify.v2.services( keycloakConfig.TWILIO_VERIFY_SID )
+      await twilioClient.verify.v2.services( this.keycloakConfig.TWILIO_VERIFY_SID )
         .verifications
         .create( { to: phoneNumber, channel: 'sms' } );
     } catch ( error ) {
@@ -423,7 +421,7 @@ class KeycloakService extends Keycloak {
 
   // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
   async validateOTP( username, password, realm, otpToValidate ) {
-    const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN )
+    const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN )
     const adminToken = adminData.access_token
 
     // getting user details for fetching attributes and otpSecret or OTP validation
@@ -464,7 +462,7 @@ class KeycloakService extends Keycloak {
       // running OTP validation flow for SMS
       else if ( userAttributes.twoFAChannel[ 0 ] == 'sms' ) {
         try {
-          let verificationStatus = await twilioClient.verify.v2.services( keycloakConfig.TWILIO_VERIFY_SID )
+          let verificationStatus = await twilioClient.verify.v2.services( this.keycloakConfig.TWILIO_VERIFY_SID )
             .verificationChecks
             .create( { to: userAttributes.phoneNumber[ 0 ], code: otpToValidate } );
 
@@ -514,9 +512,9 @@ class KeycloakService extends Keycloak {
       let error;
       let responseObject;
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
-      //keycloakConfig["auth-server-url"] +'realms
+      //this.keycloakConfig["auth-server-url"] +'realms
       let config = {
 
         method: "post",
@@ -529,9 +527,9 @@ class KeycloakService extends Keycloak {
         data: {
           username: user_name,
           password: user_password,
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
-          grant_type: keycloakConfig.GRANT_TYPE,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
         },
 
       };
@@ -562,11 +560,11 @@ class KeycloakService extends Keycloak {
               try {
 
                 let config1 = { ...config };
-                config1.data.username = keycloakConfig.USERNAME_ADMIN;
-                config1.data.password = keycloakConfig.PASSWORD_ADMIN;
+                config1.data.username = this.keycloakConfig.USERNAME_ADMIN;
+                config1.data.password = this.keycloakConfig.PASSWORD_ADMIN;
                 delete config1.data.token;
 
-                config1.url = keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
+                config1.url = this.keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
                 let adminTokenResponse = await requestController.httpRequest( config1, true );
 
@@ -578,7 +576,7 @@ class KeycloakService extends Keycloak {
 
                     config1.headers.Authorization = "Bearer " + admin_token;
                     config1.method = "get";
-                    config1.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
+                    config1.url = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + realm_name + "/users?username=" + user_name + "&exact=true";
                     delete config1.data;
 
                     let getuserDetails = await requestController.httpRequest( config1, true );
@@ -685,15 +683,15 @@ class KeycloakService extends Keycloak {
               data: {
                 username: user_name,
                 password: user_password,
-                client_id: keycloakConfig.CLIENT_ID,
-                client_secret: keycloakConfig.credentials.secret,
-                grant_type: keycloakConfig.GRANT_TYPE,
+                client_id: this.keycloakConfig.CLIENT_ID,
+                client_secret: this.keycloakConfig.credentials.secret,
+                grant_type: this.keycloakConfig.GRANT_TYPE,
               },
 
             };
 
             config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
-            config.data.audience = keycloakConfig.CLIENT_ID;
+            config.data.audience = this.keycloakConfig.CLIENT_ID;
             config.headers.Authorization = "Bearer " + token;
 
             //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
@@ -706,7 +704,7 @@ class KeycloakService extends Keycloak {
                 refresh_token = rptResponse.data.refresh_token;
 
                 let userToken = token;
-                config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                config.data.grant_type = this.keycloakConfig.GRANT_TYPE;
                 config.data.token = token;
                 URL = URL + "/introspect";
                 config.url = URL;
@@ -940,7 +938,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token/introspect";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token/introspect";
 
       let config = {
 
@@ -953,8 +951,8 @@ class KeycloakService extends Keycloak {
         },
         data: {
           username: username,
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
           token: token,
         },
 
@@ -997,7 +995,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients?clientId=" + keycloakConfig[ "CLIENT_ID" ];
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/clients?clientId=" + this.keycloakConfig[ "CLIENT_ID" ];
 
       let config = {
         method: "get",
@@ -1034,11 +1032,11 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  createResource( resource_name, resource_scope = keycloakConfig.SCOPE_NAME ) {
+  createResource( resource_name, resource_scope = this.keycloakConfig.SCOPE_NAME ) {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1050,9 +1048,9 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
-          grant_type: keycloakConfig.GRANT_TYPE_PAT,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
+          grant_type: this.keycloakConfig.GRANT_TYPE_PAT,
         },
 
       };
@@ -1074,7 +1072,7 @@ class KeycloakService extends Keycloak {
           config.data._id = resource_name;
           config.data.resource_scopes = [ resource_scope ];
 
-          config.url = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/authz/protection/resource_set";
+          config.url = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/authz/protection/resource_set";
           config.headers.Authorization = "Bearer " + token;
           config.headers[ "Content-Type" ] = "application/json";
 
@@ -1117,7 +1115,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1129,9 +1127,9 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
-          grant_type: keycloakConfig.GRANT_TYPE_PAT,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
+          grant_type: this.keycloakConfig.GRANT_TYPE_PAT,
         },
 
       };
@@ -1145,7 +1143,7 @@ class KeycloakService extends Keycloak {
 
           token = patToken.data.access_token;
           //  D.E.L.E.T.E    R.E.S.O.U.R.C.E  A.N.D   P.E.R.M.I.S.S.I.O.N   R.E.Q.U.E.S.T
-          let URL1 = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/authz/protection/resource_set/" + resource_name;
+          let URL1 = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/authz/protection/resource_set/" + resource_name;
 
           config.url = URL1;
           config.method = "delete";
@@ -1162,11 +1160,11 @@ class KeycloakService extends Keycloak {
             config.method = "post";
             config.url = URL;
             delete config.headers[ "Authorization" ];
-            config.data.client_id = keycloakConfig.CLIENT_ID;
-            config.data.username = keycloakConfig.USERNAME_ADMIN;
-            config.data.password = keycloakConfig.PASSWORD_ADMIN;
-            config.data.grant_type = keycloakConfig.GRANT_TYPE;
-            config.data.client_secret = keycloakConfig.credentials.secret;
+            config.data.client_id = this.keycloakConfig.CLIENT_ID;
+            config.data.username = this.keycloakConfig.USERNAME_ADMIN;
+            config.data.password = this.keycloakConfig.PASSWORD_ADMIN;
+            config.data.grant_type = this.keycloakConfig.GRANT_TYPE;
+            config.data.client_secret = this.keycloakConfig.credentials.secret;
 
             try {
 
@@ -1176,7 +1174,7 @@ class KeycloakService extends Keycloak {
               // now deleting policy
               config.method = "delete";
               delete config.data;
-              let URL6 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/clients/" + keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/user/" + resource_name + "-policy";
+              let URL6 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/clients/" + this.keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/user/" + resource_name + "-policy";
               config.url = URL6;
 
               delete config.headers[ "Accept" ];
@@ -1242,7 +1240,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients/" + clientId + "/authz/resource-server/policy?name=" + policyName + "&exact=true";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/clients/" + clientId + "/authz/resource-server/policy?name=" + policyName + "&exact=true";
 
       let config = {
 
@@ -1288,7 +1286,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1300,11 +1298,11 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          username: keycloakConfig.USERNAME_ADMIN,
-          password: keycloakConfig.PASSWORD_ADMIN,
-          grant_type: keycloakConfig.GRANT_TYPE,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          username: this.keycloakConfig.USERNAME_ADMIN,
+          password: this.keycloakConfig.PASSWORD_ADMIN,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
+          client_secret: this.keycloakConfig.credentials.secret,
         },
 
       };
@@ -1316,7 +1314,7 @@ class KeycloakService extends Keycloak {
 
         //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
         //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y
-        let URL3 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/clients/" + keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/role";
+        let URL3 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/clients/" + this.keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/role";
         config.url = URL3;
         config.headers[ "Content-Type" ] = "application/json";
         config.headers.Authorization = "Bearer " + token;
@@ -1370,7 +1368,7 @@ class KeycloakService extends Keycloak {
 
 
       let policyId = policyObj.id;
-      let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/clients/" + clientId + "/authz/resource-server/policy/user/" + policyId;
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/clients/" + clientId + "/authz/resource-server/policy/user/" + policyId;
 
       delete policyObj.id;
 
@@ -1417,7 +1415,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let token;
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1429,11 +1427,11 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          username: keycloakConfig.USERNAME_ADMIN,
-          password: keycloakConfig.PASSWORD_ADMIN,
-          grant_type: keycloakConfig.GRANT_TYPE,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          username: this.keycloakConfig.USERNAME_ADMIN,
+          password: this.keycloakConfig.PASSWORD_ADMIN,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
+          client_secret: this.keycloakConfig.credentials.secret,
         },
 
       };
@@ -1445,7 +1443,7 @@ class KeycloakService extends Keycloak {
 
         //   T.O.K.E.N    R.E.Q.U.E.S.T  (user with admin is already defined in keycloak with roles 'realm-management')
         //   //  C.R.E.A.T.E    U.S.E.R    B.A.S.E.D    P.O.L.I.C.Y
-        let URL3 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/clients/" + keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/permission/scope";
+        let URL3 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/clients/" + this.keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/permission/scope";
         config.url = URL3;
         config.headers[ "Content-Type" ] = "application/json";
         config.headers.Authorization = "Bearer " + token;
@@ -1512,11 +1510,11 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          username: keycloakConfig.USERNAME_ADMIN,
-          password: keycloakConfig.PASSWORD_ADMIN,
-          grant_type: keycloakConfig.GRANT_TYPE,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          username: this.keycloakConfig.USERNAME_ADMIN,
+          password: this.keycloakConfig.PASSWORD_ADMIN,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
+          client_secret: this.keycloakConfig.credentials.secret,
         },
 
       };
@@ -1529,11 +1527,11 @@ class KeycloakService extends Keycloak {
         // EVALUATION REQUEST
         let data = JSON.stringify( {
           resources: [ { _id: resource_name } ],
-          clientId: keycloakConfig.CLIENT_DB_ID,
+          clientId: this.keycloakConfig.CLIENT_DB_ID,
           userId: keycloak_user_id,
         } );
 
-        config.data.clientId = keycloakConfig.CLIENT_DB_ID;
+        config.data.clientId = this.keycloakConfig.CLIENT_DB_ID;
         config.data.resources = [ { _id: resource_name } ];
         config.data.userId = keycloak_user_id;
         delete config.data[ "username" ];
@@ -1542,7 +1540,7 @@ class KeycloakService extends Keycloak {
         delete config.data[ "client_secret" ];
         delete config.data[ "client_id" ];
 
-        let URL5 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/clients/" + keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/evaluate";
+        let URL5 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/clients/" + this.keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/evaluate";
         config.url = URL5;
         config.headers[ "Content-Type" ] = "application/json";
         ( config.headers.Authorization = "Bearer " + token ), ( config.data = JSON.stringify( config.data ) );
@@ -1591,11 +1589,11 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          username: keycloakConfig.USERNAME_ADMIN,
-          password: keycloakConfig.PASSWORD_ADMIN,
-          grant_type: keycloakConfig.GRANT_TYPE,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          username: this.keycloakConfig.USERNAME_ADMIN,
+          password: this.keycloakConfig.PASSWORD_ADMIN,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
+          client_secret: this.keycloakConfig.credentials.secret,
         },
       };
 
@@ -1606,7 +1604,7 @@ class KeycloakService extends Keycloak {
         // now deleting policy
         config.method = "delete";
         delete config.data;
-        let URL6 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/clients/" + keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/user/" + resource_name + "-policy";
+        let URL6 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/clients/" + this.keycloakConfig.CLIENT_DB_ID + "/authz/resource-server/policy/user/" + resource_name + "-policy";
         config.url = URL6;
         delete config.headers[ "Accept" ];
         delete config.headers[ "cache-control" ];
@@ -1661,7 +1659,7 @@ class KeycloakService extends Keycloak {
       try {
 
         // User Groups
-        let URL = keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
+        let URL = this.keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
         config.url = URL;
 
         try {
@@ -1692,7 +1690,7 @@ class KeycloakService extends Keycloak {
         }
 
         // User Groups from Keycloak
-        let URL1 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users/" + userId + "/groups";
+        let URL1 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/users/" + userId + "/groups";
         config.url = URL1;
         config.headers.Authorization = "Bearer " + adminToken;
 
@@ -1743,7 +1741,7 @@ class KeycloakService extends Keycloak {
 
       let token;
       let message;
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
 
 
@@ -1787,11 +1785,11 @@ class KeycloakService extends Keycloak {
             "Content-Type": "application/x-www-form-urlencoded",
           },
           data: {
-            client_id: keycloakConfig.CLIENT_ID,
-            username: keycloakConfig.USERNAME_ADMIN,
-            password: keycloakConfig.PASSWORD_ADMIN,
-            grant_type: keycloakConfig.GRANT_TYPE,
-            client_secret: keycloakConfig.credentials.secret,
+            client_id: this.keycloakConfig.CLIENT_ID,
+            username: this.keycloakConfig.USERNAME_ADMIN,
+            password: this.keycloakConfig.PASSWORD_ADMIN,
+            grant_type: this.keycloakConfig.GRANT_TYPE,
+            client_secret: this.keycloakConfig.credentials.secret,
           },
 
         };
@@ -1819,7 +1817,7 @@ class KeycloakService extends Keycloak {
           //admin case
           if ( "realm-management" in clientRoles ) {
 
-            let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups";
+            let URL2 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/groups";
             config.url = URL2;
 
             try {
@@ -1891,7 +1889,7 @@ class KeycloakService extends Keycloak {
             }
           }
 
-          allUsers = await teamsService.getUsersOfGroups( groupsData, config, keycloakConfig );
+          allUsers = await teamsService.getUsersOfGroups( groupsData, config, this.keycloakConfig );
           resolve( allUsers );
 
         } catch ( er ) {
@@ -1928,7 +1926,7 @@ class KeycloakService extends Keycloak {
 
       let token;
       let groupsData = [];
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
 
@@ -1940,11 +1938,11 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          username: keycloakConfig.USERNAME_ADMIN,
-          password: keycloakConfig.PASSWORD_ADMIN,
-          grant_type: keycloakConfig.GRANT_TYPE,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          username: this.keycloakConfig.USERNAME_ADMIN,
+          password: this.keycloakConfig.PASSWORD_ADMIN,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
+          client_secret: this.keycloakConfig.credentials.secret,
         },
 
       };
@@ -1967,7 +1965,7 @@ class KeycloakService extends Keycloak {
 
               let groupData = {};
 
-              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups/" + groupIds[ i ] + "/";
+              let URL2 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/groups/" + groupIds[ i ] + "/";
               config.url = URL2;
               let groupInfo = await requestController.httpRequest( config, true );
 
@@ -1988,7 +1986,7 @@ class KeycloakService extends Keycloak {
 
                   for ( let j = 0; j < supervisorList.length; j++ ) {
 
-                    let URL3 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/users?username=" + supervisorList[ j ] + "&exact=true";
+                    let URL3 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/users?username=" + supervisorList[ j ] + "&exact=true";
                     config.url = URL3;
 
                     try {
@@ -2019,7 +2017,7 @@ class KeycloakService extends Keycloak {
                 }
               }
 
-              let URL4 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/groups/" + groupIds[ i ] + "/members";
+              let URL4 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/groups/" + groupIds[ i ] + "/members";
               config.url = URL4;
               let users = await requestController.httpRequest( config, true );
 
@@ -2106,7 +2104,7 @@ class KeycloakService extends Keycloak {
       try {
 
         //Fetching admin token, we pass it in our "Create User" API for authorization
-        let keycloakAuthToken = await this.getAccessToken( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
+        let keycloakAuthToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
 
         if ( keycloakAuthToken.access_token ) {
 
@@ -2131,7 +2129,7 @@ class KeycloakService extends Keycloak {
 
             try {
 
-              config.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig.realm + "/roles/" + keycloak_roles[ i ] + "/users?max=100000";
+              config.url = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig.realm + "/roles/" + keycloak_roles[ i ] + "/users?max=100000";
               let getUsersfromRoles = await requestController.httpRequest( config, true );
               userObject = getUsersfromRoles.data;
 
@@ -2199,7 +2197,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/roles`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/roles`;
 
       let config = {
         method: "get",
@@ -2232,7 +2230,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${userId}/role-mappings/realm`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${userId}/role-mappings/realm`;
 
       let config = {
         method: "post",
@@ -2266,7 +2264,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${userId}/groups/`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${userId}/groups/`;
 
       let config = {
         method: "get",
@@ -2305,7 +2303,7 @@ class KeycloakService extends Keycloak {
 
       for ( let name of groupNames ) {
 
-        let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/groups?search=${name}`;
+        let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/groups?search=${name}`;
 
         let config = {
           method: "get",
@@ -2360,7 +2358,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/groups/${groupId}/`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/groups/${groupId}/`;
 
       let config = {
         method: "get",
@@ -2408,13 +2406,13 @@ class KeycloakService extends Keycloak {
 
       for ( let group of groups ) {
 
-        let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${userId}/groups/${group.id}`;
+        let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${userId}/groups/${group.id}`;
         config.url = URL;
 
         if ( method == 'put' ) {
 
           config.data = {
-            realm: keycloakConfig[ "realm" ],
+            realm: this.keycloakConfig[ "realm" ],
             userId: userId,
             groupId: group.id
           }
@@ -2466,7 +2464,7 @@ class KeycloakService extends Keycloak {
 
       let rolesArr = realmRoles.filter( role => roles.includes( role.name ) );
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${userId}/role-mappings/realm`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${userId}/role-mappings/realm`;
 
 
       let config = {
@@ -2501,7 +2499,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/groups`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/groups`;
 
       let data = {
         name: groupName,
@@ -2569,14 +2567,14 @@ class KeycloakService extends Keycloak {
           try {
 
             //Fetching admin token, we pass it in our "Create User" API for authorization
-            keycloakAdminToken = await this.getAccessToken( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
+            keycloakAdminToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
 
             try {
 
               //Checking whether finesse password is updated or not. If updated, update it on keycloak as well without halting login process
               await this.checkPasswordUpdate( keycloakAdminToken.access_token, finesseLoginResponse.data.username, password );
               //Checking whether finesse user already exist in keycloak and fetch its token
-              keycloakAuthToken = await this.getAccessToken( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ] );
+              keycloakAuthToken = await this.getAccessToken( finesseLoginResponse.data.username, password, this.keycloakConfig[ "realm" ] );
               authenticatedByKeycloak = true;
 
               if ( !updateUserPromise ) {
@@ -2585,7 +2583,7 @@ class KeycloakService extends Keycloak {
                   .then( async ( updatedUser ) => {
 
                     //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
-                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, keycloakConfig[ "realm" ], 'CISCO' );
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( finesseLoginResponse.data.username, password, this.keycloakConfig[ "realm" ], 'CISCO' );
                   } )
                   .catch( ( err ) => {
 
@@ -2656,7 +2654,7 @@ class KeycloakService extends Keycloak {
                 if ( userCreated.status == 201 ) {
 
                   //Returning the token of recently created User
-                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, keycloakConfig[ "realm" ], 'CISCO' );
+                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( finesseLoginResponse.data.username ).toLowerCase(), password, this.keycloakConfig[ "realm" ], 'CISCO' );
                 }
 
               } catch ( err ) {
@@ -2702,7 +2700,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users`;
+      let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users`;
 
       let data = {
 
@@ -2800,7 +2798,7 @@ class KeycloakService extends Keycloak {
         let ciscoTeamId = userObject.group.id;
 
         //Check whether team of Agent already exists in CX Core or not
-        let URL1 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
+        let URL1 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
 
         let config1 = {
 
@@ -2836,7 +2834,7 @@ class KeycloakService extends Keycloak {
           if ( getAgentCXTeam.data.length == 0 ) {
 
             //Setting URL to Create CX team of Agent
-            let URL2 = `${keycloakConfig[ "ef-server-url" ]}team`;
+            let URL2 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
             let data = {
               "team_Id": userObject.group.id,
@@ -2868,7 +2866,7 @@ class KeycloakService extends Keycloak {
           }
 
           //First send the newly created user to CX DB.
-          let URL3 = `${keycloakConfig[ "ef-server-url" ]}users/`;
+          let URL3 = `${this.keycloakConfig[ "ef-server-url" ]}users/`;
 
           let data = {
             "id": userId,
@@ -2897,7 +2895,7 @@ class KeycloakService extends Keycloak {
           }
 
           //Assign Agent to a team
-          let URL4 = `${keycloakConfig[ "ef-server-url" ]}team/${userObject.group.id}/member`;
+          let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team/${userObject.group.id}/member`;
 
           data = {
             "type": "agent",
@@ -2943,7 +2941,7 @@ class KeycloakService extends Keycloak {
             let supervisorTeamId = supervisedGroup.id;
 
             //Check whether team of Supervisor already exists in CX Core or not
-            let URL5 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
+            let URL5 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
 
             config1.url = URL5;
 
@@ -2955,7 +2953,7 @@ class KeycloakService extends Keycloak {
               if ( getSupervisorCXTeam.data.length == 0 ) {
 
                 //Creating or Updating Supervisor team in CX Core.
-                let URL6 = `${keycloakConfig[ "ef-server-url" ]}team`;
+                let URL6 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
                 let data = {
                   "team_Id": supervisorTeamId,
@@ -2993,7 +2991,7 @@ class KeycloakService extends Keycloak {
                 if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
                   //Assign Secondary Supervisor to a team
-                  let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+                  let URL7 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
 
                   data = {
                     "type": "secondary-supervisor",
@@ -3025,7 +3023,7 @@ class KeycloakService extends Keycloak {
                 } else {
 
                   //Check whether team of Supervisor already exists in CX Core or not
-                  let URL8 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+                  let URL8 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
 
                   let data = {
                     "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
@@ -3134,7 +3132,7 @@ class KeycloakService extends Keycloak {
         }
 
         //get user attributes to check its user_name and extension
-        let URL = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
+        let URL = `${this.keycloakConfig[ "auth-server-url" ]}${this.keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${this.keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
 
         let config = {
 
@@ -3186,7 +3184,7 @@ class KeycloakService extends Keycloak {
         if ( Object.keys( data ).length > 0 ) {
 
 
-          let URL1 = `${keycloakConfig[ "auth-server-url" ]}${keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
+          let URL1 = `${this.keycloakConfig[ "auth-server-url" ]}${this.keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${this.keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
 
           config.url = URL1;
           config.method = 'put';
@@ -3298,7 +3296,7 @@ class KeycloakService extends Keycloak {
               };
 
               //User Groups
-              let URL2 = keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
+              let URL2 = this.keycloakConfig[ "ef-server-url" ] + "team/user/" + userId;
               config1.url = URL2;
 
               let config2 = {
@@ -3345,7 +3343,7 @@ class KeycloakService extends Keycloak {
 
                   //We have to both add agent to a team corresponding to Finesse and remove it from CX team.
                   //Removing agent from CX team first
-                  let URL3 = `${keycloakConfig[ "ef-server-url" ]}team/${userTeam.teamId}/member?type=agent&usernames=${finObj.username.toLowerCase()}`;
+                  let URL3 = `${this.keycloakConfig[ "ef-server-url" ]}team/${userTeam.teamId}/member?type=agent&usernames=${finObj.username.toLowerCase()}`;
 
                   config1.method = 'delete';
                   config1.url = URL3;
@@ -3366,7 +3364,7 @@ class KeycloakService extends Keycloak {
                   }
 
                   //Check whether team of Agent already exists in CX Core or not
-                  let URL4 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${finObj.group.id}`;
+                  let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${finObj.group.id}`;
 
                   config1.method = 'get';
                   config1.url = URL4;
@@ -3382,7 +3380,7 @@ class KeycloakService extends Keycloak {
                     if ( getAgentCXTeam.data.length == 0 ) {
 
                       //Setting URL to Create CX team of Agent
-                      let URL5 = `${keycloakConfig[ "ef-server-url" ]}team`;
+                      let URL5 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
                       let data = {
                         "team_Id": finObj.group.id,
@@ -3414,7 +3412,7 @@ class KeycloakService extends Keycloak {
                     }
 
                     //Assign Agent to a team
-                    let URL6 = `${keycloakConfig[ "ef-server-url" ]}team/${finObj.group.id}/member`;
+                    let URL6 = `${this.keycloakConfig[ "ef-server-url" ]}team/${finObj.group.id}/member`;
 
                     data = {
                       "type": "agent",
@@ -3462,7 +3460,7 @@ class KeycloakService extends Keycloak {
                       if ( supervisedTeam.type === 'secondary supervisor' ) {
 
                         //Removing user from Secondary Supervisor in CX Core
-                        let URL13 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
+                        let URL13 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
 
                         config2.method = 'delete';
                         config2.url = URL13;
@@ -3487,7 +3485,7 @@ class KeycloakService extends Keycloak {
                       } else {
 
                         //Removing user from Supervising team in CX Core or not
-                        let URL7 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                        let URL7 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
 
                         let data = {
                           "team_name": supervisedTeam.teamName,
@@ -3539,7 +3537,7 @@ class KeycloakService extends Keycloak {
                       let supervisorTeamId = teamToAdd.id;
 
                       //Check whether team of Supervisor already exists in CX Core or not
-                      let URL8 = `${keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
+                      let URL8 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
 
                       config1.url = URL8;
 
@@ -3551,7 +3549,7 @@ class KeycloakService extends Keycloak {
                         if ( getSupervisorCXTeam.data.length == 0 ) {
 
                           //Creating or Updating Supervisor team in CX Core.
-                          let URL9 = `${keycloakConfig[ "ef-server-url" ]}team`;
+                          let URL9 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
                           let data = {
                             "team_Id": supervisorTeamId,
@@ -3587,7 +3585,7 @@ class KeycloakService extends Keycloak {
                           if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
 
                             //Assign Agent to a team
-                            let URL10 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
+                            let URL10 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
 
                             data = {
                               "type": "secondary-supervisor",
@@ -3617,7 +3615,7 @@ class KeycloakService extends Keycloak {
                           } else {
 
                             //Adding current user as Supervisor to team
-                            let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
+                            let URL11 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
 
                             let data = {
                               "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
@@ -3679,7 +3677,7 @@ class KeycloakService extends Keycloak {
                         if ( supervisedTeam.type === 'secondary supervisor' ) {
 
                           //Removing user from Secondary Supervisor in CX Core
-                          let URL11 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
+                          let URL11 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
 
                           config2.method = 'delete';
                           config2.url = URL11;
@@ -3704,7 +3702,7 @@ class KeycloakService extends Keycloak {
                         } else {
 
                           //Removing user from Supervising team in CX Core
-                          let URL12 = `${keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                          let URL12 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
 
                           let data = {
                             "team_name": supervisedTeam.teamName,
@@ -3778,8 +3776,8 @@ class KeycloakService extends Keycloak {
 
       try {
 
-        let adminToken = await this.getAccessToken( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
-        let cxTeams = await ciscoSyncService.syncCiscoData( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL, keycloakConfig, adminToken.access_token );
+        let adminToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
+        let cxTeams = await ciscoSyncService.syncCiscoData( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL, this.keycloakConfig, adminToken.access_token );
 
         resolve( cxTeams );
 
@@ -3833,9 +3831,9 @@ class KeycloakService extends Keycloak {
       let responseObject;
       user_name = ( user_name ).toLowerCase();
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
-      //keycloakConfig["auth-server-url"] +'realms
+      //this.keycloakConfig["auth-server-url"] +'realms
       let config = {
 
         method: "post",
@@ -3847,10 +3845,10 @@ class KeycloakService extends Keycloak {
         },
         data: {
           username: user_name,
-          password: keycloakConfig[ "SYNC_AGENT_PASSWORD" ],
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
-          grant_type: keycloakConfig.GRANT_TYPE,
+          password: this.keycloakConfig[ "SYNC_AGENT_PASSWORD" ],
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
+          grant_type: this.keycloakConfig.GRANT_TYPE,
         },
 
       };
@@ -3881,11 +3879,11 @@ class KeycloakService extends Keycloak {
               try {
 
                 let config1 = { ...config };
-                config1.data.username = keycloakConfig.USERNAME_ADMIN;
-                config1.data.password = keycloakConfig.PASSWORD_ADMIN;
+                config1.data.username = this.keycloakConfig.USERNAME_ADMIN;
+                config1.data.password = this.keycloakConfig.PASSWORD_ADMIN;
                 delete config1.data.token;
 
-                config1.url = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
+                config1.url = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token";
 
                 let adminTokenResponse = await requestController.httpRequest( config1, true );
 
@@ -3897,7 +3895,7 @@ class KeycloakService extends Keycloak {
 
                     config1.headers.Authorization = "Bearer " + admin_token;
                     config1.method = "get";
-                    config1.url = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?username=" + user_name + "&exact=true";
+                    config1.url = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users?username=" + user_name + "&exact=true";
                     delete config1.data;
 
                     let getuserDetails = await requestController.httpRequest( config1, true );
@@ -3911,7 +3909,7 @@ class KeycloakService extends Keycloak {
                         lastName: getuserDetails?.data[ 0 ]?.lastName ? getuserDetails?.data[ 0 ]?.lastName : "",
                         username: getuserDetails?.data[ 0 ]?.username,
                         roles: ( 'realm_access' in intro_token_response?.data && 'roles' in intro_token_response?.data?.realm_access ) ? intro_token_response?.data?.realm_access?.roles : [],
-                        realm: keycloakConfig[ "realm" ]
+                        realm: this.keycloakConfig[ "realm" ]
                       };
 
                       //Adding user custom attribute to our token object data.
@@ -4002,16 +4000,16 @@ class KeycloakService extends Keycloak {
               },
               data: {
                 username: user_name,
-                password: keycloakConfig[ "SYNC_AGENT_PASSWORD" ],
-                client_id: keycloakConfig.CLIENT_ID,
-                client_secret: keycloakConfig.credentials.secret,
-                grant_type: keycloakConfig.GRANT_TYPE,
+                password: this.keycloakConfig[ "SYNC_AGENT_PASSWORD" ],
+                client_id: this.keycloakConfig.CLIENT_ID,
+                client_secret: this.keycloakConfig.credentials.secret,
+                grant_type: this.keycloakConfig.GRANT_TYPE,
               },
 
             };
 
             config.data.grant_type = "urn:ietf:params:oauth:grant-type:uma-ticket";
-            config.data.audience = keycloakConfig.CLIENT_ID;
+            config.data.audience = this.keycloakConfig.CLIENT_ID;
             config.headers.Authorization = "Bearer " + token;
 
             //  T.O.K.E.N   R.E.Q.U.E.S.T   # 2   (A.C.C.E.S.S   T.O.K.E.N   W.I.T.H   P.E.R.M.I.S.S.I.O.N.S)
@@ -4024,7 +4022,7 @@ class KeycloakService extends Keycloak {
                 refresh_token = rptResponse.data.refresh_token;
 
                 let userToken = token;
-                config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                config.data.grant_type = this.keycloakConfig.GRANT_TYPE;
                 config.data.token = token;
                 URL = URL + "/introspect";
                 config.url = URL;
@@ -4119,7 +4117,7 @@ class KeycloakService extends Keycloak {
     return new Promise( async ( resolve, reject ) => {
 
       let passwordUpdate = false;
-      let URL = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false&exact=true"
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users?search=" + userName + "&briefRepresentation=false&exact=true"
 
       let config = {
         method: "get",
@@ -4175,7 +4173,7 @@ class KeycloakService extends Keycloak {
               let userId = userResponse.data[ 0 ].id;
 
               //API URL used to update the password.
-              let URL2 = keycloakConfig[ "auth-server-url" ] + "admin/realms/" + keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
+              let URL2 = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password"
 
               let data = {
                 "temporary": false,
@@ -4236,7 +4234,7 @@ class KeycloakService extends Keycloak {
   async generateAccessTokenFromRefreshToken( refreshToken ) {
     return new Promise( async ( resolve, reject ) => {
       let accessToken;
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig.realm + "/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig.realm + "/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -4245,8 +4243,8 @@ class KeycloakService extends Keycloak {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         data: {
-          client_id: keycloakConfig.CLIENT_ID,
-          client_secret: keycloakConfig.credentials.secret,
+          client_id: this.keycloakConfig.CLIENT_ID,
+          client_secret: this.keycloakConfig.credentials.secret,
           grant_type: "refresh_token",
           refresh_token: refreshToken,
         },
@@ -4291,7 +4289,7 @@ class KeycloakService extends Keycloak {
       let authzConfig = '';
 
       let accessToken;
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/master/protocol/openid-connect/token";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/master/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -4302,8 +4300,8 @@ class KeycloakService extends Keycloak {
         data: {
           client_id: "admin-cli",
           grant_type: "password",
-          username: keycloakConfig[ "MASTER_USERNAME" ],
-          password: keycloakConfig[ "MASTER_PASSWORD" ]
+          username: this.keycloakConfig[ "MASTER_USERNAME" ],
+          password: this.keycloakConfig[ "MASTER_PASSWORD" ]
         },
       };
 
@@ -4313,7 +4311,7 @@ class KeycloakService extends Keycloak {
 
         accessToken = adminAccessToken.data.access_token;
 
-        let createRealmUrl = keycloakConfig[ "auth-server-url" ] + 'admin/realms';
+        let createRealmUrl = this.keycloakConfig[ "auth-server-url" ] + 'admin/realms';
 
         // 1. Read the realm configuration JSON file
         console.log( `Reading realm configuration from: ${realmFile}` );
@@ -4422,7 +4420,7 @@ class KeycloakService extends Keycloak {
 
               // 4. Get the internal UUID of the target client
               console.log( `Fetching UUID for client '${targetClientIdForAuthz}' in realm '${tenantName}'...` );
-              const getClientUrl = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients`;
+              const getClientUrl = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients`;
 
               let config2 = {
 
@@ -4529,7 +4527,7 @@ class KeycloakService extends Keycloak {
               // 6. Make the API call to Keycloak to import/update authorization settings
               console.log( `Importing authorization settings for client UUID '${clientUuid}'...` );
 
-              const importAuthzUrl = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients/${clientUuid}/authz/resource-server/import`;
+              const importAuthzUrl = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients/${clientUuid}/authz/resource-server/import`;
 
               let config3 = {
 
@@ -4658,7 +4656,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( ( resolve, reject ) => {
 
-      if ( !keycloakConfig[ "auth-server-url" ] || !keycloakConfig[ "realm" ] ) {
+      if ( !this.keycloakConfig[ "auth-server-url" ] || !this.keycloakConfig[ "realm" ] ) {
         reject( {
           error_message: "Configuration Error: baseUrl and realm are required in config.",
           error_detail: "Missing required configuration parameters"
@@ -4676,7 +4674,7 @@ class KeycloakService extends Keycloak {
 
           try {
 
-            const events = await fetchAdminEvents( keycloakConfig[ "auth-server-url" ], keycloakConfig[ "realm" ], keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ] );
+            const events = await fetchAdminEvents( this.keycloakConfig[ "auth-server-url" ], this.keycloakConfig[ "realm" ], this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
             const newEvents = getNewEvents( events );
 
             newEvents.forEach( event => {
