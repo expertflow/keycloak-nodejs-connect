@@ -17,6 +17,7 @@ const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
 const CiscoSyncService = require( './ciscoSyncService.js' );
+const Dynamics365Service = require( './dynamics365Service.js' );
 
 const twilio = require( 'twilio' )
 let twilioClient = null       // will be initialized in constructor using config file
@@ -25,6 +26,7 @@ const finesseService = new FinesseService();
 const teamsService = new TeamsService();
 const errorService = new ErrorService();
 const ciscoSyncService = new CiscoSyncService();
+const dynamics365Service = new Dynamics365Service();
 
 class KeycloakService extends Keycloak {
 
@@ -3766,6 +3768,158 @@ class KeycloakService extends Keycloak {
       }
 
       resolve( [] );
+    } );
+  }
+
+  //AppDynamics365 SSO implementation
+  async dynamics365Sso( username, userRoles, validationToken, dynamics365Url, dynamics365Version ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      //Authentication of Finesse User, it returns a status code 200 if user found and 401 if unauthorized.
+      let dynamics365LoginResponse;
+
+      try {
+        //Handle finesse error cases correctly. (for later)
+        if ( dynamics365LoginResponse.length == 0 ) {
+
+          dynamics365LoginResponse = await dynamics365Service.authenticateUserViaDynamics365( validationToken, dynamics365Url, dynamics365Version );
+
+        }
+
+        //If user is SSO then password is not provided, we are setting up a pre-defined password.
+        password = password.length == 0 ? "123456" : password;
+        dynamics365LoginResponse.data.password = password;
+
+        let authenticatedByKeycloak = false;
+        let keycloakAuthToken = null;
+        let keycloakAdminToken = null;
+        let updateUserPromise = null;
+
+        if ( dynamics365LoginResponse?.status == 200 ) {
+
+          try {
+
+            //Fetching admin token, we pass it in our "Create User" API for authorization
+            keycloakAdminToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
+
+            try {
+
+              //Checking whether finesse user already exist in keycloak and fetch its token
+              keycloakAuthToken = await this.getAccessToken( dynamics365LoginResponse?.data?.username, password, this.keycloakConfig[ "realm" ] );
+              authenticatedByKeycloak = true;
+
+              if ( !updateUserPromise ) {
+
+                updateUserPromise = this.updateUser( dynamics365LoginResponse?.data, keycloakAdminToken, keycloakAuthToken, dynamics365LoginResponse?.data.username, password )
+                  .then( async ( updatedUser ) => {
+
+                    //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( dynamics365LoginResponse?.data?.username, password, this.keycloakConfig[ "realm" ], 'CISCO' );
+                  } )
+                  .catch( ( err ) => {
+
+                    reject( err );
+                  } );
+              }
+
+
+            } catch ( err ) {
+
+              if ( err.error_detail ) {
+
+                if ( err.error_detail.status == 401 ) {
+
+                  console.log( "User Not Found in Keycloak: The user does not exist in Keycloak. Syncing Finesse user in Keycloak." );
+                } else {
+
+                  reject( err );
+                }
+              } else {
+
+                reject( err );
+              }
+
+            }
+          } catch ( err ) {
+
+            let error = await errorService.handleError( err );
+
+            reject( {
+
+              error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the authenticate/sync finesse user component.",
+              error_detail: error
+            } );
+
+
+          } finally {
+
+            //Finesse User not found in keycloak, so we are going to create one.
+            if ( !authenticatedByKeycloak ) {
+
+              if ( keycloakAdminToken.access_token ) {
+
+                let token = keycloakAdminToken.access_token;
+
+                //validating customer Before Creation
+                let { error, value } = validateUser( {
+                  username,
+                  password,
+                  token,
+                  userRoles,
+                } );
+
+                if ( error ) {
+
+                  reject( {
+                    status: 400,
+                    message: "User Creation Error: An error occurred while creating the user. Error message: " + error.details[ 0 ].message,
+                  } );
+                }
+              }
+
+              try {
+
+                //Creating Finesse User inside keycloak.
+                let userCreated = await this.createUser( dynamics365LoginResponse?.data, keycloakAdminToken.access_token );
+
+                if ( userCreated.status == 201 ) {
+
+                  //Returning the token of recently created User
+                  keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( dynamics365LoginResponse?.data?.username ).toLowerCase(), password, this.keycloakConfig[ "realm" ], 'CISCO' );
+                }
+
+              } catch ( err ) {
+
+
+                let error = await errorService.handleError( err );
+
+                reject( {
+
+                  error_message: "Finesse User Creation Error: An error occurred while creating the finesse user in the authenticate/sync finesse user component.",
+                  error_detail: error
+                } );
+
+              }
+            }
+          }
+
+          if ( updateUserPromise ) {
+            await updateUserPromise; // Wait for the updateUser promise to resolve
+            updateUserPromise = null; // Reset the promise
+          }
+
+          resolve( keycloakAuthToken );
+        } else {
+
+          resolve( dynamics365LoginResponse );
+        }
+      } catch ( er ) {
+
+        reject( er );
+      }
+
+
     } );
   }
 
