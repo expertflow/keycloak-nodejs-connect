@@ -4277,7 +4277,7 @@ class KeycloakService extends Keycloak {
 
   // !-------------- Multitenancy -----------------!
 
-  async createRealmAsTenant( tenantName, realmDataString, authzConfigDataString ) {
+  async createRealmAsTenant( tenantName, realmDataString, authzConfigDataString, keycloakConfig ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -4323,7 +4323,7 @@ class KeycloakService extends Keycloak {
       let mainMessage = "";
 
       let accessToken;
-      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/master/protocol/openid-connect/token";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/master/protocol/openid-connect/token";
 
       let config = {
         method: "post",
@@ -4334,8 +4334,8 @@ class KeycloakService extends Keycloak {
         data: {
           client_id: "admin-cli",
           grant_type: "password",
-          username: this.keycloakConfig[ "MASTER_USERNAME" ],
-          password: this.keycloakConfig[ "MASTER_PASSWORD" ]
+          username: keycloakConfig[ "MASTER_USERNAME" ],
+          password: keycloakConfig[ "MASTER_PASSWORD" ]
         },
       };
 
@@ -4345,7 +4345,7 @@ class KeycloakService extends Keycloak {
 
         accessToken = adminAccessToken.data.access_token;
 
-        let createRealmUrl = this.keycloakConfig[ "auth-server-url" ] + 'admin/realms';
+        let createRealmUrl = keycloakConfig[ "auth-server-url" ] + 'admin/realms';
 
         // 1. Read the realm configuration JSON file
         console.log( `Reading realm configuration from provided realm data.` );
@@ -4364,8 +4364,6 @@ class KeycloakService extends Keycloak {
           },
           data: realmData
         };
-
-        console.log( realmData );
 
         try {
 
@@ -4392,7 +4390,7 @@ class KeycloakService extends Keycloak {
 
               // 4. Get the internal UUID of the target client
               console.log( `Fetching UUID for client '${targetClientIdForAuthz}' in realm '${tenantName}'...` );
-              const getClientUrl = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients`;
+              const getClientUrl = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients`;
 
               let config2 = {
 
@@ -4465,7 +4463,7 @@ class KeycloakService extends Keycloak {
                 } );
               }
 
-              const importAuthzUrl = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients/${clientUuid}/authz/resource-server/import`;
+              const importAuthzUrl = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients/${clientUuid}/authz/resource-server/import`;
 
               let config3 = {
 
