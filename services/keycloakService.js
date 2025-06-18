@@ -4277,16 +4277,50 @@ class KeycloakService extends Keycloak {
 
   // !-------------- Multitenancy -----------------!
 
-  async createRealmAsTenant( tenantName, realmFile, authzConfigFilePath ) {
+  async createRealmAsTenant( tenantName, realmDataString, authzConfigDataString ) {
 
     return new Promise( async ( resolve, reject ) => {
 
+      let realmData;
+      let authzConfigData;
+
+
+      try {
+
+        realmData = JSON.parse( realmDataString );
+
+      } catch ( parseError ) {
+
+        if ( parseError instanceof SyntaxError ) {
+
+          reject( {
+            "error_message": "Error occurred while parsing Realm file during Tenant creation process.",
+            "error_detail": {
+              "status": 400,
+              "reason": `Invalid JSON in realm configuration file: ${parseError.message} `
+            }
+          } );
+        }
+
+        reject( {
+          "error_message": "Error occurred while parsing Realm file during Tenant creation process.",
+          "error_detail": {
+            "status": 500,
+            "reason": `Error parsing realm configuration file: ${parseError.message}`
+          }
+        } );
+      }
+
+      if ( Object.keys( realmData ).length < 1 ) {
+
+        reject( {
+          errorStatus: 400,
+          errorMessage: `Received no realm data to import while creating tenant. Please send the correct realm data from realm file`
+        } );
+      }
+
       let realmImportSuccessful = false;
       let mainMessage = "";
-      let realmConfigString = '';
-      let realmData = '';
-      let authzConfigString = '';
-      let authzConfig = '';
 
       let accessToken;
       let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/master/protocol/openid-connect/token";
@@ -4314,73 +4348,7 @@ class KeycloakService extends Keycloak {
         let createRealmUrl = this.keycloakConfig[ "auth-server-url" ] + 'admin/realms';
 
         // 1. Read the realm configuration JSON file
-        console.log( `Reading realm configuration from: ${realmFile}` );
-
-        try {
-
-          realmConfigString = await fs.readFileSync( realmFile, 'utf-8' );
-
-        } catch ( fileReadError ) {
-
-          if ( fileReadError.code === 'ENOENT' ) {
-
-            reject( {
-              "error_message": "Error occurred while reading Realm file during Tenant creation process.",
-              "error_detail": {
-                "status": 404,
-                "reason": `Realm configuration file not found at provided path: ${realmFile} `
-              }
-            } );
-          }
-
-          reject( {
-            "error_message": "Error occurred while reading Realm file during Tenant creation process.",
-            "error_detail": {
-              "status": 500,
-              "reason": `Error reading realm configuration file: ${fileReadError.message}. {file path: ${realmFile}} `
-            }
-          } )
-
-        }
-
-        if ( !realmConfigString || realmConfigString.trim() === '' ) {
-
-          reject( {
-            "error_message": "Error occurred while reading Realm file during Tenant creation process.",
-            "error_detail": {
-              "status": 404,
-              "reason": `Provided Realm configuration file to create Tenant is empty. Please provide valid realm file in JSON format. `
-            }
-          } );
-
-        }
-
-        try {
-
-          realmData = JSON.parse( realmConfigString );
-
-        } catch ( parseError ) {
-
-          if ( parseError instanceof SyntaxError ) {
-
-            reject( {
-              "error_message": "Error occurred while parsing Realm file during Tenant creation process.",
-              "error_detail": {
-                "status": 400,
-                "reason": `Invalid JSON in realm configuration file: ${parseError.message} `
-              }
-            } );
-          }
-
-          reject( {
-            "error_message": "Error occurred while parsing Realm file during Tenant creation process.",
-            "error_detail": {
-              "status": 500,
-              "reason": `Error parsing realm configuration file: ${parseError.message}`
-            }
-          } );
-        }
-
+        console.log( `Reading realm configuration from provided realm data.` );
 
         realmData.id = tenantName;
         realmData.realm = tenantName;
@@ -4397,6 +4365,8 @@ class KeycloakService extends Keycloak {
           data: realmData
         };
 
+        console.log( realmData );
+
         try {
 
           let realmCreation = await requestController.httpRequest( config1, false );
@@ -4408,8 +4378,10 @@ class KeycloakService extends Keycloak {
 
           }
 
+          console.log( mainMessage );
+
           // --- Authorization Settings Import (if applicable) ---
-          if ( realmImportSuccessful && authzConfigFilePath ) {
+          if ( realmImportSuccessful && authzConfigDataString ) {
 
             let targetClientIdForAuthz = 'cim';
 
@@ -4455,51 +4427,13 @@ class KeycloakService extends Keycloak {
                 throw new Error( `Client with clientId '${targetClientIdForAuthz}' not found in realm '${tenantName}'. Response: ${JSON.stringify( clientSearchResponse.data )}` );
               }
 
-              // 5. Read the authorization settings JSON file
-              console.log( `Reading authorization settings from: ${authzConfigFilePath}` );
+
+              // 6. Make the API call to Keycloak to import/update authorization settings
+              console.log( `Importing authorization settings for client UUID '${clientUuid}'...` );
 
               try {
 
-                authzConfigString = await fs.readFileSync( authzConfigFilePath, 'utf-8' );
-
-              } catch ( fileReadError ) {
-
-                if ( fileReadError.code === 'ENOENT' ) {
-
-                  reject( {
-                    "error_message": `Error occurred while reading Authz file while importing Permissions/Policies in ${targetClientIdForAuthz} during Tenant creation process.`,
-                    "error_detail": {
-                      "status": 404,
-                      "reason": `Authz file not found at provided path: ${authzConfigString}. `
-                    }
-                  } );
-                }
-
-                reject( {
-                  "error_message": `Error occurred while reading Authz file while importing Permissions/Policies in ${targetClientIdForAuthz} during Tenant creation process.`,
-                  "error_detail": {
-                    "status": 500,
-                    "reason": `Error reading authz file: ${fileReadError.message}. {file path: ${authzConfigString}} `
-                  }
-                } )
-
-              }
-
-              if ( !authzConfigString || authzConfigString.trim() === '' ) {
-
-                reject( {
-                  "error_message": `Error occurred while reading Authz file while importing Permissions/Policies in ${targetClientIdForAuthz} during Tenant creation process.`,
-                  "error_detail": {
-                    "status": 404,
-                    "reason": `Provided authz file to import Permissions/Policies is empty. Please provide valid authz file in JSON format. `
-                  }
-                } );
-
-              }
-
-              try {
-
-                authzConfig = JSON.parse( authzConfigString );
+                authzConfigData = JSON.parse( authzConfigDataString );
 
               } catch ( parseError ) {
 
@@ -4523,9 +4457,13 @@ class KeycloakService extends Keycloak {
                 } );
               }
 
+              if ( Object.keys( authzConfigData ).length < 1 ) {
 
-              // 6. Make the API call to Keycloak to import/update authorization settings
-              console.log( `Importing authorization settings for client UUID '${clientUuid}'...` );
+                reject( {
+                  errorStatus: 400,
+                  errorMessage: `Received no authorization data to import while creating tenant. Please send the correct authorization data from authz file`
+                } );
+              }
 
               const importAuthzUrl = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${tenantName}/clients/${clientUuid}/authz/resource-server/import`;
 
@@ -4537,7 +4475,7 @@ class KeycloakService extends Keycloak {
                   "Content-Type": "application/json",
                   "Authorization": `Bearer ${accessToken}`
                 },
-                data: authzConfig
+                data: authzConfigData
               };
 
               const authzResponse = await requestController.httpRequest( config3, false );
@@ -4584,10 +4522,6 @@ class KeycloakService extends Keycloak {
 
                   console.error( 'No response received from Keycloak (Authz Import):', er.request );
 
-
-                } else if ( er?.code === 'ENOENT' && er?.path === authzConfigFilePath ) {
-
-                  console.error( 'Authorization settings file not found:', authzConfigFilePath );
 
                 } else {
 
