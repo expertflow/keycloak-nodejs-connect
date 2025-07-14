@@ -80,12 +80,19 @@ class ErrorService {
                                     status: err.response.status,
                                     reason: 'Invalid Realm: The realm is not valid in the keycloak configuration. Please provide a valid Keycloak realm.',
                                 };
+                                
                             case 'invalid_grant':
 
+                                let reasonToReturn
+                                if(err.response.status === 400){
+                                    reasonToReturn = 'Password Update Required: Please update your password, as it was set temporarily by the admin.' 
+                                }
+                                else reasonToReturn = 'Invalid User Credentials: The provided credentials are not valid. Please enter valid user credentials.'
                                 return {
                                     status: err.response.status,
-                                    reason: 'Invalid User Credentials: The provided credentials are not valid. Please enter valid user credentials.',
+                                    reason: reasonToReturn,
                                 };
+
                             default:
 
                                 if ( typeof ( err.response.data ) === "object" ) {
