@@ -503,6 +503,102 @@ class KeycloakService extends Keycloak {
     return userToken
   }
 
+  // function for resetting/updating user password
+  async resetPassword(username, currentPassword, newPassword){
+    let updatePasswordFlag = false;
+    try {
+      // check if currentPassword is valid
+      await this.getAccessToken(username, currentPassword);
+      updatePasswordFlag = true
+    } catch (error) {
+      if (error.error_detail.status === 400) updatePasswordFlag = true;
+      else {
+        return Promise.reject({
+          error_message: "Invalid User Credentials",
+          error_detail: {
+            status: 401,
+            reason: "Invalid User Credentials: Current user credentials are not valid while updating password. Please enter valid user credentials.",
+          },
+        });
+      }
+    }
+
+    if (updatePasswordFlag) {
+      // getting admin token to update password
+      try {
+        const adminData = await this.getAccessToken(this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN);
+        const adminToken = adminData.access_token; 
+        
+        // fetching userId from Keycloak to update the password 
+        let URL = this.keycloakConfig["auth-server-url"] + "admin/realms/" + this.keycloakConfig["realm"] + "/users/?exact=true&username=" + username;
+        let config = {
+          method: "get",
+          url: URL,
+          headers: {
+            Accept: "application/json",
+            "cache-control": "no-cache",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+        };
+        
+        try {
+          const usersData = await requestController.httpRequest(config, false);
+          if (usersData.data.length > 0) {
+            const userId = usersData.data[0].id;
+            
+            // updating user password using userId
+            let URL = this.keycloakConfig["auth-server-url"] + "admin/realms/" + this.keycloakConfig["realm"] + "/users/" + userId + "/reset-password";
+            let config = {
+              method: "put",
+              url: URL,
+              headers: {
+                Accept: "application/json",
+                "cache-control": "no-cache",
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${adminToken}`,
+              },
+              data: {
+                type: "password",
+                temporary: false,
+                value: newPassword,
+              },
+            };
+  
+            try {
+              await requestController.httpRequest(config, false);
+              return Promise.resolve({
+                response: 204,
+                message: "Password updated successfully.",
+              });
+            } catch (error) {
+              return Promise.reject({
+                error: 400,
+                error_message: "An error occured while updating the password. Please try again.",
+              });
+            }
+          }
+
+        } catch (error) {
+          let err = await errorService.handleError(error);
+          return Promise.reject({
+            error_message: "Error occurred while fetching user attributes.",
+            error_detail: err,
+          });
+        }  
+
+      } catch (error) {
+        error = await errorService.handleError(error);
+        return Promise.reject({
+          error_message: "Admin Token Generation Error: Failed to generate an admin access token in password update process.",
+          error_detail: error,
+        });        
+      }
+    }
+
+  }
+    
+
   async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
 
     return new Promise( async ( resolve, reject ) => {
