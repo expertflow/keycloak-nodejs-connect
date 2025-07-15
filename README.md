@@ -41,6 +41,7 @@ This adapter is extended from keycloak-connect and have functionalities of both 
   - assignRoleToUser
   - authenticateFinesse
   - createRealmAsTenant
+  - dynamics365Sso
   
 ```
 ### Example
@@ -445,6 +446,9 @@ It takes 5 arguments:
  - finesse_server_url: The url of finesse server (In case of normal keycloak auth, send this parameter as **' '**)
  - user_roles: The array containing user_roles, it will be used to assign roles to finesse user while synching it with Keycloak (for normal auth send it as [ ]).
  - finesse_token: acess token for finesse SSO authentication (It will be passed if Finesse SSO instance is connected, in case of non SSO will pass empty string **' '** as argument)
+
+
+
  
  ##### Example of SSO Finesse Auth:
  
@@ -454,6 +458,15 @@ It takes 5 arguments:
  ##### Example of non SSO Finesse Auth:
       
       authenticateFinesse('johndoe', '12345', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
+
+### dynamics365Sso( userRoles, validationToken, dynamics365Url )
+
+This function sync microsoft dynamics 365 user in keycloak, it first authenticates user from dynamics365, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and team mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and team and return the access_token along with role mapping/team mapping for newly created user.
+
+It takes 3 arguments: 
+ - userRoles: The array containing user roles, it will be used to assign roles to dynamics365 user while synching it with Keycloak e.g **['agent']**.
+ - validationToken: acess token for dynamics365 user validation and to get user details.
+ - dynamics365Url: The url of dynamics365 server e.g **'https://{fqdn}/api/data/v9.0'**
 
 ### generateAccessTokenFromRefreshToken(refreshToken)
 

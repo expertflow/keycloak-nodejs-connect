@@ -6,17 +6,16 @@ let requestController = require( "../controller/requestController.js" );
 class Dynamics365Service {
 
 
-    async authenticateUserViaDynamics365( validationToken, dynamics365Url, dynamics365Version ) {
+    async authenticateUserViaDynamics365( validationToken, dynamics365Url ) {
 
         return new Promise( async ( resolve, reject ) => {
 
-            let URL = dynamics365Url + '/api/data/' + dynamics365Version + '/WhoAmI()'
-            let userObject = {};
+            let URL = dynamics365Url + '/WhoAmI'
 
 
             let config = {
                 method: 'get',
-                'Content-Type': 'application / json',
+                'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'OData-MaxVersion': '4.0',
                 'OData-Version': '4.0',
@@ -30,24 +29,23 @@ class Dynamics365Service {
 
             try {
 
-                let whoAmIResponse = await requestController.httpRequest( config, true );
+                let whoAmIResponse = await requestController.httpRequest( config, false );
 
                 let userId = whoAmIResponse?.data?.UserId;
 
                 try {
 
-                    let URL1 = `${dynamics365Url}/api/data/${dynamics365Version}/systemusers(${userId})`
+                    let URL1 = `${dynamics365Url}/systemusers(${userId})?$select=fullname,firstname,middlename,lastname,internalemailaddress,title,isdisabled,businessunitid,mobilephone,createdon,modifiedon`
                     config.url = URL1;
+                    config.maxBodyLength = 'Infinity';
 
                     let userObjectResponse = await requestController.httpRequest( config, true );
-                    userObject = userObjectResponse.data;
-
-                    console.log( userObjectResponse );
+                    let userObject = userObjectResponse?.data;
 
 
                     resolve( {
                         'data': userObject,
-                        'status': userObjectResponse.status
+                        'status': userObjectResponse?.status
                     } );
 
                 }
