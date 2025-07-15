@@ -529,23 +529,12 @@ class KeycloakService extends Keycloak {
         const adminData = await this.getAccessToken(this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN);
         const adminToken = adminData.access_token; 
         
-        // fetching userId from Keycloak to update the password 
-        let URL = this.keycloakConfig["auth-server-url"] + "admin/realms/" + this.keycloakConfig["realm"] + "/users/?exact=true&username=" + username;
-        let config = {
-          method: "get",
-          url: URL,
-          headers: {
-            Accept: "application/json",
-            "cache-control": "no-cache",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
-          },
-        };
-        
+        // fetching userId from Keycloak to update the password        
         try {
-          const usersData = await requestController.httpRequest(config, false);
-          if (usersData.data.length > 0) {
-            const userId = usersData.data[0].id;
+          const usersData = await this.getUserDetails(adminToken, username);
+
+          if (usersData) {
+            const userId = usersData.id;
             
             // updating user password using userId
             let URL = this.keycloakConfig["auth-server-url"] + "admin/realms/" + this.keycloakConfig["realm"] + "/users/" + userId + "/reset-password";
@@ -595,9 +584,7 @@ class KeycloakService extends Keycloak {
         });        
       }
     }
-
   }
-    
 
   async getKeycloakTokenWithIntrospect( user_name, user_password, realm_name, type ) {
 
