@@ -509,17 +509,17 @@ class KeycloakService extends Keycloak {
     try {
       // check if currentPassword is valid
       await this.getAccessToken(username, currentPassword);
-      updatePasswordFlag = true
+      updatePasswordFlag = true;
     } catch (error) {
       if (error.error_detail.status === 400) updatePasswordFlag = true;
       else {
-        return Promise.reject({
-          error_message: "Invalid User Credentials",
-          error_detail: {
-            status: 401,
-            reason: "Invalid User Credentials: Current user credentials are not valid while updating password. Please enter valid user credentials.",
-          },
-        });
+        if (error.error_detail.status === 401) {
+          error.error_message = "Invalid User Credentials";
+          error.error_detail.reason = "Invalid User Credentials: Current user credentials are not valid while updating password. Please enter valid user credentials.";
+        } 
+        else error.error_message = "An error occured while updating the password. Please try again.";
+
+        return Promise.reject(error);
       }
     }
 
@@ -532,7 +532,6 @@ class KeycloakService extends Keycloak {
         // fetching userId from Keycloak to update the password        
         try {
           const usersData = await this.getUserDetails(adminToken, username);
-
           if (usersData) {
             const userId = usersData.id;
             
@@ -557,14 +556,19 @@ class KeycloakService extends Keycloak {
             try {
               await requestController.httpRequest(config, false);
               return Promise.resolve({
-                response: 204,
+                status: 204,
                 message: "Password updated successfully.",
               });
             } catch (error) {
-              return Promise.reject({
-                error: 400,
-                error_message: "An error occured while updating the password. Please try again.",
-              });
+              let errorToReturn = {
+                error_message: 'An error occured while updating the password. Please try again.',
+                error_detail: {
+                  status: error.status,
+                  reason: error.response.data.error_description ? error.response.data.error_description : error.response.data.error
+                }
+              }
+
+              return Promise.reject(errorToReturn)
             }
           }
 
