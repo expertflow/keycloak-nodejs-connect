@@ -1,6 +1,6 @@
 {
   "name": "ef-keycloak-connect",
-  "version": "1.8.4-patch-2.0",
+  "version": "1.9.0_f-CXIM-552",
   "description": "Node JS keycloak adapter for authentication and authorization.",
   "main": "index.js",
   "scripts": {

@@ -17,6 +17,7 @@ const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
 const CiscoSyncService = require( './ciscoSyncService.js' );
+const Dynamics365Service = require( './dynamics365Service.js' );
 
 const twilio = require( 'twilio' )
 let twilioClient = null       // will be initialized in constructor using config file
@@ -25,6 +26,7 @@ const finesseService = new FinesseService();
 const teamsService = new TeamsService();
 const errorService = new ErrorService();
 const ciscoSyncService = new CiscoSyncService();
+const dynamics365Service = new Dynamics365Service();
 
 class KeycloakService extends Keycloak {
 
@@ -2791,23 +2793,26 @@ class KeycloakService extends Keycloak {
 
       let data = {
 
-        username: userObject.username,
-        firstName: userObject.firstName,
-        lastName: userObject.lastName,
+        username: ( userObject?.type == "dynamics365" ) ? userObject?.fullname : userObject?.username,
+        firstName: ( userObject?.type == "dynamics365" ) ? userObject?.firstname : userObject?.firstName,
+        lastName: ( userObject?.type == "dynamics365" ) ? userObject?.lastname : userObject?.lastName,
+        email: ( userObject?.type == "dynamics365" ) ? userObject?.internalemailaddress : '',
         enabled: true,
         credentials: [
           {
             type: "password",
-            value: userObject.password,
+            value: userObject?.password,
             temporary: false,
           },
         ],
         attributes: {
-          "user_name": `${userObject.loginName}`,
-          "extension": `${userObject.extension}`
+          "user_name": `${( userObject?.loginName ) ? userObject?.loginName : ''}`,
+          "extension": `${( userObject?.extension ) ? userObject?.extension : 'CISCO'}`
         },
         groups: assignGroups
       };
+
+      userObject?.type == "dynamics365" && ( data.attributes.userid = userObject?.ownerid );
 
       let config = {
 
@@ -2882,7 +2887,96 @@ class KeycloakService extends Keycloak {
         }
 
 
-        let ciscoTeamId = userObject.group.id;
+        if ( userObject?.type == "dynamics365" ) {
+
+          let tempUrl1 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
+
+          let tempConfig1 = {
+
+            url: tempUrl1,
+            method: "get",
+            headers: {
+              Accept: "application/json",
+              "cache-control": "no-cache",
+              "Content-Type": "application/x-www-form-urlencoded",
+            }
+
+          };
+
+          try {
+
+            let getTeamsList = await requestController.httpRequest( tempConfig1, false );
+
+            // Access the actual array of teams from the .data property.
+            const teamsData = getTeamsList?.data;
+
+            // Check if the teamsData array is empty or not an array.
+            if ( !Array.isArray( teamsData ) || teamsData.length === 0 ) {
+
+              console.log( "teamsData array is empty or invalid. Assigning 1 to userObject.group.id." );
+              userObject.group.id = 1;
+
+            } else {
+
+              const findDefaultTeamId = ( teamsArray ) => {
+
+                // Rule 1: Find a team with team_name "default" (case-insensitive).
+                const defaultTeam = teamsArray.find(
+                  ( team ) => team.team_name && team.team_name.toLowerCase() === "default"
+                );
+
+                if ( defaultTeam ) {
+                  console.log( 'Rule 1 matched: Found team with name "default".' );
+                  return defaultTeam.team_Id;
+                }
+
+                console.log( 'Rule 1 failed: No team with name "default" found.' );
+
+                // Rule 2: If no "default" team, find a team with team_Id of 1 whose name is NOT "default".
+                const teamWithIdOne = teamsArray.find(
+                  ( team ) =>
+                    ( team.team_Id === 1 || team.team_Id === "1" ) &&
+                    team.team_name?.toLowerCase() !== "default"
+                );
+
+                if ( teamWithIdOne ) {
+                  console.log( "Rule 2 matched: Found a team with team_Id of 1 and a non-default name." );
+                  return crypto.randomUUID();
+                }
+
+                console.log( "Rule 2 failed: No suitable team with team_Id of 1 found." );
+
+                // Rule 3: If no default team was found and no suitable team with ID 1 was found, return a random ID.
+                console.log( "Rule 3 matched: Defaulting to a new random UUID." );
+                return 1;
+              };
+
+              // Call the function with the fetched list of teams
+              const defaultTeamId = findDefaultTeamId( teamsData );
+
+              // Assign the resulting ID to the userObject
+              userObject.groupId = defaultTeamId;
+
+              // You can now use the 'defaultTeamId' variable and the updated userObject
+              console.log( `The determined default Team ID is: ${defaultTeamId}` );
+            }
+
+          } catch ( er ) {
+
+            let error = await errorService.handleError( er );
+
+            reject( {
+
+              error_message: "Dynamics365 Team Sync Error: Error occured while checking for default team in CX.",
+              error_detail: error
+            } );
+          }
+
+        }
+
+        ( userObject?.type == "dynamics365" ) && ( userObject.groupName = "default" );
+
+        let ciscoTeamId = ( userObject?.type == "dynamics365" ) ? userObject.groupId : userObject.group.id;
 
         //Check whether team of Agent already exists in CX Core or not
         let URL1 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
@@ -2913,7 +3007,7 @@ class KeycloakService extends Keycloak {
 
         try {
 
-          let getAgentCXTeam = await requestController.httpRequest( config1, false );
+          let getAgentCXTeam = await requestController.httpRequest( config1, true );
 
           let createAgentCXTeam;
 
@@ -2924,8 +3018,8 @@ class KeycloakService extends Keycloak {
             let URL2 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
             let data = {
-              "team_Id": userObject.group.id,
-              "team_name": userObject.group.name,
+              "team_Id": ( userObject?.type == "dynamics365" ) ? ciscoTeamId : userObject.group.id,
+              "team_name": ( userObject?.type == "dynamics365" ) ? userObject?.groupName : userObject.group.name,
               "supervisor_Id": "",
               "source": "CISCO",
               "created_by": "1"
@@ -2934,10 +3028,13 @@ class KeycloakService extends Keycloak {
             config2.url = URL2;
             config2.data = data;
 
+            console.log( 'create team if does not exist ' )
+
             try {
 
               //Creating CX team of Agent
-              createAgentCXTeam = await requestController.httpRequest( config2, false );
+              createAgentCXTeam = await requestController.httpRequest( config2, true );
+              console.log( createAgentCXTeam );
 
             } catch ( er ) {
 
@@ -2957,18 +3054,57 @@ class KeycloakService extends Keycloak {
 
           let data = {
             "id": userId,
-            "username": userObject.username.toLocaleLowerCase(),
-            "firstName": userObject.firstName,
-            "lastName": userObject.lastName,
+            "username": ( userObject?.type == "dynamics365" ) ? userObject?.fullname : userObject?.username.toLocaleLowerCase(),
+            "firstName": ( userObject?.type == "dynamics365" ) ? userObject.firstname : userObject.firstName,
+            "lastName": ( userObject?.type == "dynamics365" ) ? userObject.lastname : userObject.lastName,
             "roles": userObject.roles
           }
 
           config2.url = URL3;
           config2.data = data;
 
+          console.log( 'send data to db' );
+
           try {
 
-            let sendSupUserToCX = await requestController.httpRequest( config2, false );
+            let sendSupUserToCX = requestController.httpRequest( config2, false ).then( async res => {
+
+              //Assign Agent to a team
+              let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team/${ciscoTeamId}/member`;
+
+              data = {
+                "type": "agent",
+                "usernames": [ ( userObject?.type == "dynamics365" ) ? userObject?.fullname : userObject?.username.toLocaleLowerCase() ]
+              }
+
+              config2.url = URL4;
+              config2.data = data;
+
+              console.log( 'adding user as member of team' );
+
+              try {
+
+                //Assigning Agent to CX team
+                let assignAgentToTeam = await requestController.httpRequest( config2, false );
+                return assignAgentToTeam;
+
+              } catch ( er ) {
+
+                let error = await errorService.handleError( er );
+
+                return reject( {
+
+                  error_message: "Finesse Team Sync Error: Error occured while assigning agent to cx core team.",
+                  error_detail: error
+                } );
+              }
+
+
+
+            } ).catch( err => {
+              console.log( err );
+
+            } );
 
           } catch ( er ) {
 
@@ -2981,21 +3117,24 @@ class KeycloakService extends Keycloak {
             } );
           }
 
-          //Assign Agent to a team
-          let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team/${userObject.group.id}/member`;
+          /* //Assign Agent to a team
+          let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team/${ciscoTeamId}/member`;
 
           data = {
             "type": "agent",
-            "usernames": [ userObject.username.toLocaleLowerCase() ]
+            "usernames": [ ( userObject?.type == "dynamics365" ) ? userObject?.fullname : userObject?.username.toLocaleLowerCase() ]
           }
 
           config2.url = URL4;
           config2.data = data;
 
+          console.log( 'adding user as member of team' );
+          console.log( config2 );
+
           try {
 
             //Assigning Agent to CX team
-            let assignAgentToTeam = await requestController.httpRequest( config2, false );
+            let assignAgentToTeam = await requestController.httpRequest( config2, true );
 
           } catch ( er ) {
 
@@ -3006,7 +3145,7 @@ class KeycloakService extends Keycloak {
               error_message: "Finesse Team Sync Error: Error occured while assigning agent to cx core team.",
               error_detail: error
             } );
-          }
+          }*/
 
         } catch ( er ) {
 
@@ -3021,7 +3160,7 @@ class KeycloakService extends Keycloak {
 
 
 
-        if ( userObject.roles.includes( "supervisor" ) && userObject.supervisedGroups.length > 0 ) {
+        if ( userObject.roles.includes( "supervisor" ) && userObject.supervisedGroups.length > 0 && userObject?.type !== "dynamics365" ) {
 
           for ( let supervisedGroup of userObject.supervisedGroups ) {
 
@@ -3207,12 +3346,14 @@ class KeycloakService extends Keycloak {
         let rptToken = await this.getTokenRPT( username, password, keycloakAuthToken.access_token );
         let introspectToken = await this.getIntrospectToken( rptToken.access_token );
 
+
         let keyObj = {
           id: introspectToken.sub,
           username: introspectToken.username,
           firstName: introspectToken.given_name,
           lastName: introspectToken.family_name,
           roles: introspectToken.realm_access.roles,
+          email: introspectToken.email,
           permittedResources: {
             Resources: introspectToken.authorization.permissions,
           }
@@ -3234,7 +3375,7 @@ class KeycloakService extends Keycloak {
         try {
 
           let userDataResponse = await requestController.httpRequest( config, false );
-          userAttributes = userDataResponse.data.attributes;
+          userAttributes = userDataResponse?.data?.attributes;
 
         } catch ( err ) {
 
@@ -3248,24 +3389,34 @@ class KeycloakService extends Keycloak {
 
         }
 
+        finObj.username = ( finObj?.type == "dynamics365" ) ? finObj?.fullname : finObj?.username;
+        finObj.firstName = ( finObj?.type == "dynamics365" ) ? finObj?.firstname : finObj?.firstName;
+        finObj.lastName = ( finObj?.type == "dynamics365" ) ? finObj?.lastname : finObj?.lastName;
+        finObj.email = ( finObj?.type == "dynamics365" ) ? finObj?.internalemailaddress : '';
+
         //Comparing the basic info of Finesse User and Normal User.
         if ( ( finObj.username ).toLowerCase() != keyObj.username
           || finObj.firstName != keyObj.firstName
           || finObj.lastName != keyObj.lastName
-          || ( userAttributes.user_name && finObj.loginName !== userAttributes.user_name[ 0 ] )
-          || ( userAttributes.extension && finObj.extension !== userAttributes.extension[ 0 ] )
-          || ( !userAttributes.user_name )
+          || finObj.email !== keyObj.email
+          || ( userAttributes.user_name && finObj?.loginName !== userAttributes?.user_name[ 0 ] )
+          || ( userAttributes.extension && finObj?.extension !== userAttributes?.extension[ 0 ] )
+          || ( userAttributes.userid && finObj?.ownerid !== userAttributes?.userid )
+          || ( finObj?.type !== "dynamics365" && !userAttributes.user_name )
         ) {
 
           data = {
-            username: ( finObj.username ).toLowerCase(),
-            firstName: finObj.firstName,
-            lastName: finObj.lastName,
+            username: ( finObj?.username ).toLowerCase(),
+            firstName: finObj?.firstName,
+            lastName: finObj?.lastName,
+            email: finObj?.email,
             attributes: {
-              "user_name": `${finObj.loginName}`,
-              "extension": `${finObj.extension}`
+              "user_name": `${( finObj?.loginName ) ? finObj?.loginName : ''}`,
+              "extension": `${( finObj?.extension ) ? finObj?.extension : 'CISCO'}`
             }
           };
+
+          finObj?.type == "dynamics365" && ( data.attributes.userid = finObj?.ownerid );
         }
 
         if ( Object.keys( data ).length > 0 ) {
@@ -3401,11 +3552,103 @@ class KeycloakService extends Keycloak {
 
                 let userTeams = await requestController.httpRequest( config1, true );
 
+                if ( finObj?.type == "dynamics365" ) {
+
+                  let tempUrl1 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
+
+                  let tempConfig1 = {
+
+                    url: tempUrl1,
+                    method: "get",
+                    headers: {
+                      Accept: "application/json",
+                      "cache-control": "no-cache",
+                      "Content-Type": "application/x-www-form-urlencoded",
+                    }
+
+                  };
+
+                  try {
+
+                    let getTeamsList = await requestController.httpRequest( tempConfig1, false );
+
+                    // Access the actual array of teams from the .data property.
+                    const teamsData = getTeamsList?.data;
+
+                    // Check if the teamsData array is empty or not an array.
+                    if ( !Array.isArray( teamsData ) || teamsData.length === 0 ) {
+
+                      console.log( "teamsData array is empty or invalid. Assigning 1 to finObject.group.id." );
+                      finObj.group.id = 1;
+
+                    } else {
+
+                      const findDefaultTeamId = ( teamsArray ) => {
+
+                        // Rule 1: Find a team with team_name "default" (case-insensitive).
+                        const defaultTeam = teamsArray.find(
+                          ( team ) => team.team_name && team.team_name.toLowerCase() === "default"
+                        );
+
+                        if ( defaultTeam ) {
+                          console.log( 'Rule 1 matched: Found team with name "default".' );
+                          return defaultTeam.team_Id;
+                        }
+
+                        console.log( 'Rule 1 failed: No team with name "default" found.' );
+
+                        // Rule 2: If no "default" team, find a team with team_Id of 1 whose name is NOT "default".
+                        const teamWithIdOne = teamsArray.find(
+                          ( team ) =>
+                            ( team.team_Id === 1 || team.team_Id === "1" ) &&
+                            team.team_name?.toLowerCase() !== "default"
+                        );
+
+                        if ( teamWithIdOne ) {
+                          console.log( "Rule 2 matched: Found a team with team_Id of 1 and a non-default name." );
+                          return crypto.randomUUID();
+                        }
+
+                        console.log( "Rule 2 failed: No suitable team with team_Id of 1 found." );
+
+                        // Rule 3: If no default team was found and no suitable team with ID 1 was found, return a random ID.
+                        console.log( "Rule 3 matched: Defaulting to a new random UUID." );
+                        return 1;
+                      };
+
+                      // Call the function with the fetched list of teams
+                      const defaultTeamId = findDefaultTeamId( teamsData );
+
+                      // Assign the resulting ID to the finObject
+                      finObj.groupId = defaultTeamId;
+
+                      // You can now use the 'defaultTeamId' variable and the updated userObject
+                      console.log( `The determined default Team ID is: ${defaultTeamId}` );
+                    }
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+
+                      error_message: "Dynamics365 Team Sync Error: Error occured while checking for default team in CX.",
+                      error_detail: error
+                    } );
+                  }
+
+                }
+
+                ( finObj?.type == "dynamics365" ) && ( finObj.groupName = "default" );
+
+                let ciscoTeamId = ( finObj?.type == "dynamics365" ) ? finObj.groupId : finObj.group.id;
+
+
                 const { userTeam, supervisedTeams } = userTeams.data;
 
                 let supervisedTeamsFiltered = [];
 
-                if ( supervisedTeams.length > 0 ) {
+                if ( supervisedTeams.length > 0 && !( finObj?.type == "dynamics365" ) ) {
 
                   //Fetching list of all primary and seconday supervised teams of current user (Whether in CX or Cisco)
                   supervisedTeamsFiltered = supervisedTeams.filter( team => {
@@ -3426,7 +3669,7 @@ class KeycloakService extends Keycloak {
                 }
 
                 //If Agent team in finesse is different from Agent Team in finesse
-                if ( finObj.group.id !== userTeam.teamId ) {
+                if ( ciscoTeamId !== userTeam.teamId ) {
 
                   //We have to both add agent to a team corresponding to Finesse and remove it from CX team.
                   //Removing agent from CX team first
@@ -3451,7 +3694,7 @@ class KeycloakService extends Keycloak {
                   }
 
                   //Check whether team of Agent already exists in CX Core or not
-                  let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${finObj.group.id}`;
+                  let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
 
                   config1.method = 'get';
                   config1.url = URL4;
@@ -3470,8 +3713,8 @@ class KeycloakService extends Keycloak {
                       let URL5 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
                       let data = {
-                        "team_Id": finObj.group.id,
-                        "team_name": finObj.group.name,
+                        "team_Id": ciscoTeamId,
+                        "team_name": ( finObj?.type == "dynamics365" ) ? finObj?.groupName : finObj.group.name,
                         "supervisor_Id": "",
                         "source": "CISCO",
                         "created_by": "1"
@@ -3499,7 +3742,7 @@ class KeycloakService extends Keycloak {
                     }
 
                     //Assign Agent to a team
-                    let URL6 = `${this.keycloakConfig[ "ef-server-url" ]}team/${finObj.group.id}/member`;
+                    let URL6 = `${this.keycloakConfig[ "ef-server-url" ]}team/${ciscoTeamId}/member`;
 
                     data = {
                       "type": "agent",
@@ -3538,7 +3781,7 @@ class KeycloakService extends Keycloak {
                 }
 
                 //If no team is assigned to supervise to current user in Cisco, remove its all supervised teams from CX
-                if ( !finObj.supervisedGroups && supervisedTeamsFiltered.length > 0 ) {
+                if ( !finObj.supervisedGroups && supervisedTeamsFiltered.length > 0 && !( finObj?.type == "dynamics365" ) ) {
 
                   for ( let supervisedTeam of supervisedTeamsFiltered ) {
 
@@ -3606,7 +3849,7 @@ class KeycloakService extends Keycloak {
 
                 //Supervisor Case. Filtering out teams to add and teams to remove from Supervisor
                 //First check that We have supervised Groups in finesse
-                if ( finObj.supervisedGroups ) {
+                if ( finObj.supervisedGroups && !( finObj?.type == "dynamics365" ) ) {
 
                   let finesseSupervisedGroups = finObj.supervisedGroups;
 
@@ -3856,6 +4099,151 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+  //AppDynamics365 SSO implementation
+  async dynamics365Sso( userRoles, validationToken, dynamics365Url ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      //Authentication of Finesse User, it returns a status code 200 if user found and 401 if unauthorized.
+      let dynamics365LoginResponse = {};
+
+      try {
+        //Handle finesse error cases correctly. (for later)
+        if ( Object.keys( dynamics365LoginResponse ).length === 0 ) {
+
+          dynamics365LoginResponse = await dynamics365Service.authenticateUserViaDynamics365( validationToken, dynamics365Url );
+
+        }
+
+        //If user is SSO then password is not provided, we are setting up a pre-defined password.
+        dynamics365LoginResponse.data.password = "123456";
+
+        let authenticatedByKeycloak = false;
+        let keycloakAuthToken = null;
+        let keycloakAdminToken = null;
+        let updateUserPromise = null;
+
+
+        if ( dynamics365LoginResponse?.status == 200 ) {
+
+          dynamics365LoginResponse.data.roles = userRoles;
+          dynamics365LoginResponse.data.type = "dynamics365";
+
+          console.log( dynamics365LoginResponse.data.fullname );
+
+          let trimmedUsername = dynamics365LoginResponse?.data?.fullname.trim().split( ' ' )[ 0 ]; // Removes leading/trailing spaces
+          dynamics365LoginResponse.data.fullname = trimmedUsername;
+          console.log( dynamics365LoginResponse.data.fullname );
+
+          try {
+
+            //Fetching admin token, we pass it in our "Create User" API for authorization
+            keycloakAdminToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
+
+            try {
+
+              //Checking whether finesse user already exist in keycloak and fetch its token
+              keycloakAuthToken = await this.getAccessToken( dynamics365LoginResponse?.data?.fullname, dynamics365LoginResponse.data.password, this.keycloakConfig[ "realm" ] );
+              authenticatedByKeycloak = true;
+
+              if ( !updateUserPromise ) {
+
+                updateUserPromise = this.updateUser( dynamics365LoginResponse?.data, keycloakAdminToken, keycloakAuthToken, dynamics365LoginResponse?.data.username, dynamics365LoginResponse.data.password )
+                  .then( async ( updatedUser ) => {
+
+                    //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( dynamics365LoginResponse?.data?.username, dynamics365LoginResponse.data.password, this.keycloakConfig[ "realm" ], 'CISCO' );
+                  } )
+                  .catch( ( err ) => {
+
+                    reject( err );
+                  } );
+              }
+
+
+            } catch ( err ) {
+
+              if ( err.error_detail ) {
+
+                if ( err.error_detail.status == 401 ) {
+
+                  console.log( "User Not Found in Keycloak: The user does not exist in Keycloak. Syncing Finesse user in Keycloak." );
+                } else {
+
+                  reject( err );
+                }
+              } else {
+
+                reject( err );
+              }
+
+            }
+          } catch ( err ) {
+
+            let error = await errorService.handleError( err );
+
+            reject( {
+
+              error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the authenticate/sync finesse user component.",
+              error_detail: error
+            } );
+
+
+          } finally {
+
+            //Finesse User not found in keycloak, so we are going to create one.
+            if ( !authenticatedByKeycloak ) {
+
+              if ( keycloakAdminToken.access_token ) {
+
+                try {
+
+                  //Creating Finesse User inside keycloak.
+                  let userCreated = await this.createUser( dynamics365LoginResponse?.data, keycloakAdminToken.access_token );
+
+                  if ( userCreated.status == 201 ) {
+
+                    //Returning the token of recently created User
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( dynamics365LoginResponse?.data?.fullname ).toLowerCase(), dynamics365LoginResponse.data.password, this.keycloakConfig[ "realm" ], 'CISCO' );
+                  }
+
+                } catch ( err ) {
+
+
+                  let error = await errorService.handleError( err );
+
+                  reject( {
+
+                    error_message: "Finesse User Creation Error: An error occurred while creating the finesse user in the authenticate/sync finesse user component.",
+                    error_detail: error
+                  } );
+
+                }
+              }
+            }
+          }
+
+          if ( updateUserPromise ) {
+            await updateUserPromise; // Wait for the updateUser promise to resolve
+            updateUserPromise = null; // Reset the promise
+          }
+
+          resolve( keycloakAuthToken );
+        } else {
+
+          resolve( dynamics365LoginResponse );
+        }
+
+
+      } catch ( er ) {
+
+        reject( er );
+      }
+
+
+    } );
+  }
+
   //Sync implementation for teams along with its members (both create and update).
   async syncImplementation( finesseAdministratorUsername, finesseAdministratorPassword, finesseURL ) {
 
@@ -3877,34 +4265,34 @@ class KeycloakService extends Keycloak {
 
 
     /*
-
-
+   
+   
     workflow:
-
+   
     call Cisco teams API to get all the teams, call CX Teams List API to get teams from CX. Compare both and see is there is any additional Cisco Team which doesn't exist on CX or CX team with type "CISCO" that doesn't eixst in Cisco. Create Cisco teams that are missing on CX and delete/disable CX teams that are missing on Cisco side. Also check if team_name of any team is updated on Cisco side and update it on CX. After that, call team detail API to fetch all the members of each team one by one. Then call then "CX API to get members of specific team" to get the members on CX side of same team. Check if there is any member missing or additional member of CX side and make the members exactly as in Cisco side. If a member doesn't exist then create it in keycloak and add it in CX Team corresponding to Cisco. After that, check the data of each member by calling "Keycloak API to get member list" having attribute: "Cisco User" and compare it with users in "Cisco API to fetch user list". if any user is additional in Cisco list then create it in CX and add it in its subsequent list. If any user is additional on keycloak side then disable that user. Similary, update the info exactly to the Cisco user if there is any difference i.e change in role, firstname, lastname, loginname, extension, team, supervised teams "represented by <teams> in user respresentation". There should be both create and update scenarios based on existance or non-existance of team and its members (agents, supervisors)
-
+   
     Requirements:
-
+   
     All cisco apis require administrator credentials
-
+   
     Cisco API to fetch all teams: https://uccx12-5p.ucce.ipcc:8445/finesse/api/Teams?nocache=1680864072911&bypassServerCache=true
     Cisco API to fetch team detail: https://uccx12-5p.ucce.ipcc:8445/finesse/api/Team/8
     Cisco API to fetch user detail: https://uccx12-5p.ucce.ipcc:8445/finesse/api/User/SE2606
     Cisco API to fetch user list: https://uccx12-5p.ucce.ipcc:8445/finesse/api/Users
-
+   
     CX APIs:
-
+   
     CX API to get all teams: https://cxtd-qa05.expertflow.com/unified-admin/team
     CX API to get members of specific team: https://cxtd-qa05.expertflow.com/unified-admin/team/{teamId}/member?limit=25&offset=0
-
+   
     Keycloak APIs: 
-
+   
     Keycloak API to get member list:  https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users
     Keycloak API to create user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users
     Keycloak API to get details of user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users/{user-id}
     Keycloak API to get roles of user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/roles
     Keycloak API to assign roles to user: https://cxtd-qa05.expertflow.com/auth/admin/realms/{realm}/users/${userId}/role-mappings/realm
-
+   
     */
   }
 
@@ -4188,14 +4576,6 @@ class KeycloakService extends Keycloak {
 
       }
     } );
-
-  }
-
-  async createTeamsAndMembers() {
-
-  }
-
-  async updateTeamsAndMembers() {
 
   }
 
