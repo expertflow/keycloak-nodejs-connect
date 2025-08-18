@@ -49,7 +49,7 @@ class KeycloakService extends Keycloak {
       let attributesFromToken = token.keycloak_User.attributes
 
       if ( is2FAEnabled ) {     // if 2FA is enabled then running the 2FA flow
-        if ( !twoFAChannel || twoFAChannel == '' || ( twoFAChannel !== 'app' && twoFAChannel !== 'sms' ) ) {
+        if ( !twoFAChannel || twoFAChannel == '' || ( twoFAChannel !== 'app' && twoFAChannel !== 'sms' && twoFAChannel !== 'rsa' ) ) {
           return Promise.reject( { status: 400, error_message: 'twoFAChannel parameter is empty or invalid' } )
         }
 
@@ -61,24 +61,41 @@ class KeycloakService extends Keycloak {
         // checking if user attributes in keycloak exist or not to confirm 2FA registration
         if ( !attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false' ) {
 
+          // getting admin access token to update the user attributes for RSA & Auht Apps
+          const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN );
+          const adminToken = adminData.access_token;
+
           // appending extra information regarding 2FA in response object
           tempToken.is2FARegistered = false
           tempToken.twoFAChannel = twoFAChannel
           tempToken.message = "2FA registration required"
 
+          // handling RSA authenticator scenario exclusively
+          if ( twoFAChannel === 'rsa' ) {
+
+            tempToken.is2FARegistered = true;
+            tempToken.message = "OTP required.";
+
+            //updating user attributes for RSA MFA
+            let newAttributes = {};
+            if ( attributesFromToken ) newAttributes = attributesFromToken;
+            newAttributes.twoFAChannel = "rsa";
+            newAttributes.is2FARegistered = true;
+
+            await this.updateUserAttributes( adminToken, token.keycloak_User.id, newAttributes );
+          }
+
           // if 2FA is required through authenticator app then performing necessary operation in keycloak user attributes
-          if ( twoFAChannel == 'app' ) {
+          else if ( twoFAChannel == 'app' ) {
+
             // QR Code and Secret Code generation based on username
             const qrSetup = await this.getQRCode( user_name )
             if ( qrSetup ) {
+
               tempToken.otpSecret = qrSetup.secret
               tempToken.qrImage = qrSetup.image
             }
             else return Promise.reject( { error: 404, error_message: 'Error occurred while generating QR code.' } )
-
-            // getting admin access token to update the user attributes
-            const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN )
-            const adminToken = adminData.access_token
 
             //updating user attributes for 2FA
             let newAttributes = {}
@@ -90,11 +107,10 @@ class KeycloakService extends Keycloak {
             // saving the Secret Code into KeyCloak as user attribute to validate the OTP on each login
             await this.updateUserAttributes( adminToken, token.keycloak_User.id, newAttributes )
           }
-        }
-        else if ( attributesFromToken.is2FARegistered[ 0 ] == 'true' ) {     // if user has already registered for 2FA
+        } else if ( attributesFromToken.is2FARegistered[ 0 ] == 'true' ) {     // if user has already registered for 2FA
           tempToken.is2FARegistered = true
           tempToken.twoFAChannel = attributesFromToken.twoFAChannel[ 0 ]
-          tempToken.message = "OTP required"
+          tempToken.message = "OTP required."
 
           if ( attributesFromToken.twoFAChannel[ 0 ] == 'sms' ) {
             if ( !attributesFromToken.phoneNumber ) {
@@ -223,7 +239,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
+      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
 
       let config = {
         method: "post",
@@ -488,6 +504,47 @@ class KeycloakService extends Keycloak {
         }
       }
 
+      // running OTP validation flow for RSA Authenticator
+      else if ( userAttributes.twoFAChannel[ 0 ] === 'rsa' ) {
+        // setting up SecurID API for MFA
+        let URL = keycloakConfig.RSA_Server_URL + "mfa/v1_1/authn/initialize";
+
+        // configuring headers & payload
+        let config = {
+          method: "post",
+          url: URL,
+          headers: {
+            "Content-Type": "application/json",
+            "client-key": this.keycloakConfig.RSA_Client_Key,
+          },
+          data: {
+            clientId: this.keycloakConfig.RSA_Client_ID,
+            subjectName: username,
+            subjectCredentials: [
+              {
+                methodId: "SECURID",
+                collectedInputs: [ { name: "SECURID", value: otpToValidate } ],
+              },
+            ],
+            context: {
+              authnAttemptId: "",
+              messageId: username + "2faAttempt",
+              inResponseTo: "",
+            },
+          },
+        };
+
+        try {
+          let verificationStatus = await requestController.httpRequest( config, false );
+          if ( verificationStatus.status !== 200 || !verificationStatus.data || ( verificationStatus.data.attemptResponseCode !== 'SUCCESS' && verificationStatus.data.attemptReasonCode !== 'CREDENTIAL_VERIFIED' ) ) {
+            throw false
+          }
+        }
+        catch ( err ) {
+          return Promise.reject( { error: 400, error_message: "Error occured while verifying token from RSA SecurID. This may be due to invalid token, invalid configurations or some issue with SecurID." } )
+        }
+
+      }
     }
     else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
 
@@ -514,7 +571,7 @@ class KeycloakService extends Keycloak {
 
       let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + realm_name + "/protocol/openid-connect/token";
 
-      //this.keycloakConfig["auth-server-url"] +'realms
+      //keycloakConfig["auth-server-url"] +'realms
       let config = {
 
         method: "post",
@@ -542,6 +599,7 @@ class KeycloakService extends Keycloak {
         if ( tokenResponse.data.access_token ) {
 
           token = tokenResponse.data.access_token;
+          refresh_token = tokenResponse.data.refresh_token;
 
           //To fetch introspect token to handle errors.
           let config_introspect = { ...config };
@@ -609,7 +667,7 @@ class KeycloakService extends Keycloak {
                       //Fetching Groups data for each user.
                       try {
 
-                        let teamData = await this.getUserSupervisedGroups( responseObject.id, admin_token, type );
+                        let teamData = await this.getUserSupervisedGroups( responseObject.id, admin_token, type, responseObject?.roles );
 
                         //Check for Permission Groups assignment and roles assignment against them
                         const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
@@ -700,12 +758,11 @@ class KeycloakService extends Keycloak {
               let rptResponse = await requestController.httpRequest( config, true );
 
               if ( rptResponse.data.access_token ) {
-                token = rptResponse.data.access_token;
-                refresh_token = rptResponse.data.refresh_token;
+                let rpt_token = rptResponse.data.access_token;
 
                 let userToken = token;
-                config.data.grant_type = this.keycloakConfig.GRANT_TYPE;
-                config.data.token = token;
+                config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                config.data.token = rpt_token;
                 URL = URL + "/introspect";
                 config.url = URL;
 
@@ -713,7 +770,7 @@ class KeycloakService extends Keycloak {
                 try {
 
                   let intrsopectionResponse = await requestController.httpRequest( config, true );
-                  intrsopectionResponse.data.access_token = token;
+                  intrsopectionResponse.data.access_token = rpt_token;
 
                   responseObject.permittedResources = {
                     Resources: ( intrsopectionResponse.data.authorization.permissions.length > 0 ) ? intrsopectionResponse.data.authorization.permissions : []
@@ -1640,7 +1697,7 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  async getUserSupervisedGroups( userId, adminToken, type ) {
+  async getUserSupervisedGroups( userId, adminToken, type, roles ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -1682,10 +1739,13 @@ class KeycloakService extends Keycloak {
 
         } catch ( er ) {
 
-          error = await errorService.handleError( er );
+          if ( !roles.includes( "admin" ) ) {
 
-          // Log the error and proceed with default values
-          console.error( "User Team Fetch Error: An error occurred while fetching the user's team:", error );
+            error = await errorService.handleError( er );
+
+            // Log the error and proceed with default values
+            console.error( "User Team Fetch Error: An error occurred while fetching the user's team:", error );
+          }
 
         }
 
@@ -2151,10 +2211,11 @@ class KeycloakService extends Keycloak {
                 if ( flag == true ) {
 
                   obj.push( {
-                    id: user.id,
-                    username: user.username,
-                    firstName: user.firstName == undefined ? "" : user.firstName,
-                    lastName: user.lastName == undefined ? "" : user.lastName,
+                    id: user?.id,
+                    username: user?.username,
+                    firstName: user?.firstName == undefined ? "" : user?.firstName,
+                    lastName: user?.lastName == undefined ? "" : user?.lastName,
+                    attributes: ( user?.attributes ) ? user?.attributes : {},
                     roles: [ keycloak_roles[ i ] ],
                   } );
 
@@ -2465,7 +2526,6 @@ class KeycloakService extends Keycloak {
       let rolesArr = realmRoles.filter( role => roles.includes( role.name ) );
 
       let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${userId}/role-mappings/realm`;
-
 
       let config = {
 
