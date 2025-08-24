@@ -62,7 +62,7 @@ class KeycloakService extends Keycloak {
         if ( !attributesFromToken || !attributesFromToken.is2FARegistered || attributesFromToken.is2FARegistered == 'false' ) {
 
           // getting admin access token to update the user attributes for RSA & Auht Apps
-          const adminData = await this.getAccessToken( keycloakConfig.USERNAME_ADMIN, keycloakConfig.PASSWORD_ADMIN );
+          const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN );
           const adminToken = adminData.access_token;
 
           // appending extra information regarding 2FA in response object
@@ -239,7 +239,7 @@ class KeycloakService extends Keycloak {
 
     return new Promise( async ( resolve, reject ) => {
 
-      let URL = keycloakConfig[ "auth-server-url" ] + "realms/" + keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "realms/" + this.keycloakConfig[ "realm" ] + "/protocol/openid-connect/token/introspect";
 
       let config = {
         method: "post",
@@ -507,7 +507,7 @@ class KeycloakService extends Keycloak {
       // running OTP validation flow for RSA Authenticator
       else if ( userAttributes.twoFAChannel[ 0 ] === 'rsa' ) {
         // setting up SecurID API for MFA
-        let URL = keycloakConfig.RSA_Server_URL + "mfa/v1_1/authn/initialize";
+        let URL = this.keycloakConfig.RSA_Server_URL + "mfa/v1_1/authn/initialize";
 
         // configuring headers & payload
         let config = {
@@ -761,7 +761,7 @@ class KeycloakService extends Keycloak {
                 let rpt_token = rptResponse.data.access_token;
 
                 let userToken = token;
-                config.data.grant_type = keycloakConfig.GRANT_TYPE;
+                config.data.grant_type = this.keycloakConfig.GRANT_TYPE;
                 config.data.token = rpt_token;
                 URL = URL + "/introspect";
                 config.url = URL;
@@ -773,7 +773,7 @@ class KeycloakService extends Keycloak {
                   intrsopectionResponse.data.access_token = rpt_token;
 
                   responseObject.permittedResources = {
-                    Resources: ( intrsopectionResponse.data.authorization.permissions.length > 0 ) ? intrsopectionResponse.data.authorization.permissions : []
+                    Resources: ( intrsopectionResponse?.data?.authorization?.permissions?.length > 0 ) ? intrsopectionResponse?.data?.authorization?.permissions : []
                   }
 
                   //  T.O.K.E.N   R.E.Q.U.E.S.T   # 4   ( A.D.M.I.N.  T.O.K.E.N)
