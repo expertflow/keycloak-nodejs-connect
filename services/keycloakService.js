@@ -275,6 +275,79 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+
+  // function for getting user details against user id (and extracting attributes)
+  async getUserDetailsById( userId ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      let keycloakAdminToken;
+
+      try {
+
+        //Fetching admin token, we pass it in our "Create User" API for authorization
+        keycloakAdminToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
+
+        let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId;
+
+        let config = {
+          method: "get",
+          url: URL,
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${keycloakAdminToken.access_token}`
+          }
+        };
+
+        try {
+
+          let userDetailsAgainstId = await requestController.httpRequest( config, true );
+
+          if ( userDetailsAgainstId?.data ) {
+
+            resolve( userDetailsAgainstId.data )    // extracting user details from response object
+          }
+
+        }
+        catch ( er ) {
+
+          let error
+
+          if ( er?.status && er?.status === 404 ) {
+
+            error = {
+              status: 404,
+              reason: `No user exist in keycloak against given user id: ${userId}`
+            }
+
+          } else {
+
+            error = await errorService.handleError( er );
+          }
+
+          reject( {
+            error_message: "User Details API Error: Error occurred while getting user against user id",
+            error_detail: error
+          } );
+
+        }
+      } catch ( er ) {
+
+        console.log( er );
+
+        let error = await errorService.handleError( er );
+
+        reject( {
+
+          error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in getUserDetailsById function.",
+          error_detail: error
+        } );
+
+      }
+    } );
+  }
+
   // function for getting user details (and extracting attributes)
   async getUserDetails( adminToken, username ) {
     let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users?username=" + username + "&exact=true";
