@@ -82,10 +82,16 @@ class ErrorService {
                                 };
                             case 'invalid_grant':
 
+                                let reasonToReturn
+                                if(err.response.status === 400){
+                                    reasonToReturn = 'Password Update Required: Please update your password, as it was set temporarily by the admin or has expired.' 
+                                }
+                                else reasonToReturn = 'Invalid User Credentials: The provided credentials are not valid. Please enter valid user credentials.'
                                 return {
                                     status: err.response.status,
-                                    reason: 'Invalid User Credentials: The provided credentials are not valid. Please enter valid user credentials.',
+                                    reason: reasonToReturn,
                                 };
+
                             default:
 
                                 if ( typeof ( err.response.data ) === "object" ) {
