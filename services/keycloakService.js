@@ -140,13 +140,16 @@ class KeycloakService extends Keycloak {
       }
 
       // check for password expiration to return a warning/message
-      try {
-        const passwordExpirationCheck = await this.checkPasswordExpiration(user_name);
-        if (passwordExpirationCheck) {
-          token.passwordExpiration = passwordExpirationCheck;
+      const warningLimit = this.keycloakConfig["PASSWORD_EXPIRY_WARNING_LIMIT"];
+      if (warningLimit > 0) {
+        try {
+          const passwordExpirationCheck = await this.checkPasswordExpiration(user_name);
+          if (passwordExpirationCheck) {
+            token.passwordExpiration = passwordExpirationCheck;
+          }
+        } catch (error) {
+          return Promise.reject(error);
         }
-      } catch (error) { 
-        return Promise.reject(error);
       }
 
       return token;
