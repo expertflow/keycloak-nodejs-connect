@@ -140,15 +140,15 @@ class KeycloakService extends Keycloak {
       }
 
       // check for password expiration to return a warning/message
-      const warningLimit = this.keycloakConfig["PASSWORD_EXPIRY_WARNING_LIMIT"];
-      if (warningLimit > 0) {
+      const warningLimit = this.keycloakConfig[ "PASSWORD_EXPIRY_WARNING_LIMIT" ];
+      if ( warningLimit > 0 ) {
         try {
-          const passwordExpirationCheck = await this.checkPasswordExpiration(user_name);
-          if (passwordExpirationCheck) {
+          const passwordExpirationCheck = await this.checkPasswordExpiration( user_name );
+          if ( passwordExpirationCheck ) {
             token.passwordExpiration = passwordExpirationCheck;
           }
-        } catch (error) {
-          return Promise.reject(error);
+        } catch ( error ) {
+          return Promise.reject( error );
         }
       }
 
@@ -646,19 +646,108 @@ class KeycloakService extends Keycloak {
     return userToken
   }
 
+  // function for resetting/updating user password
+  async resetPassword( username, currentPassword, newPassword ) {
+
+    let updatePasswordFlag = false;
+
+    try {
+      // check if currentPassword is valid
+      await this.getAccessToken( username, currentPassword );
+      updatePasswordFlag = true;
+    } catch ( error ) {
+      if ( error.error_detail.status === 400 ) updatePasswordFlag = true;
+      else {
+        if ( error.error_detail.status === 401 ) {
+          error.error_message = "Invalid User Credentials";
+          error.error_detail.reason = "Invalid User Credentials: Current user credentials are not valid while updating password. Please enter valid user credentials.";
+        }
+        else error.error_message = "An error occured while updating the password. Please try again.";
+
+        return Promise.reject( error );
+      }
+    }
+
+    if ( updatePasswordFlag ) {
+      // getting admin token to update password
+      try {
+        const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN );
+        const adminToken = adminData.access_token;
+
+        // fetching userId from Keycloak to update the password        
+        try {
+          const usersData = await this.getUserDetails( adminToken, username );
+          if ( usersData ) {
+            const userId = usersData.id;
+
+            // updating user password using userId
+            let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId + "/reset-password";
+            let config = {
+              method: "put",
+              url: URL,
+              headers: {
+                Accept: "application/json",
+                "cache-control": "no-cache",
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${adminToken}`,
+              },
+              data: {
+                type: "password",
+                temporary: false,
+                value: newPassword,
+              },
+            };
+
+            try {
+              await requestController.httpRequest( config, false );
+              return Promise.resolve( {
+                status: 204,
+                message: "Password updated successfully.",
+              } );
+            } catch ( error ) {
+              let errorToReturn = {
+                error_message: 'An error occured while updating the password. Please try again.',
+                error_detail: {
+                  status: error.status,
+                  reason: error.response.data.error_description ? error.response.data.error_description : error.response.data.error
+                }
+              }
+
+              return Promise.reject( errorToReturn )
+            }
+          }
+
+        } catch ( error ) {
+          let err = await errorService.handleError( error );
+          return Promise.reject( {
+            error_message: "Error occurred while fetching user attributes.",
+            error_detail: err,
+          } );
+        }
+
+      } catch ( error ) {
+        error = await errorService.handleError( error );
+        return Promise.reject( {
+          error_message: "Admin Token Generation Error: Failed to generate an admin access token in password update process.",
+          error_detail: error,
+        } );
+      }
+    }
+  }
+
   // function to check the password expiration and return a warning/message
-  async checkPasswordExpiration(username){
+  async checkPasswordExpiration( username ) {
     try {
       // get admin token to fetch credentials' details
-      const adminData = await this.getAccessToken(this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN);
-      const adminToken = adminData.access_token;  
-        
+      const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN );
+      const adminToken = adminData.access_token;
+
       try {
         // get User ID to fetch user credentials
-        const userDetails = await this.getUserDetails(adminToken, username);
+        const userDetails = await this.getUserDetails( adminToken, username );
         const userId = userDetails.id;
-    
-        let URL = this.keycloakConfig["auth-server-url"] + "admin/realms/" + this.keycloakConfig["realm"] + "/users/" + userId + "/credentials";
+
+        let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId + "/credentials";
         let config = {
           method: "get",
           url: URL,
@@ -672,82 +761,82 @@ class KeycloakService extends Keycloak {
 
         try {
           // fetch user credentials' details and calculate password expiry limit
-          const credentialsDetails = await requestController.httpRequest(config, true);
-          const creationTimestamp = credentialsDetails.data[0].createdDate;
+          const credentialsDetails = await requestController.httpRequest( config, true );
+          const creationTimestamp = credentialsDetails.data[ 0 ].createdDate;
           const currentTimestamp = Date.now();
-      
-          const creationDate = new Date(creationTimestamp);
-          const currentDate = new Date(currentTimestamp);
-        
-          const diffInMs = Math.abs(currentDate - creationDate);      // calculate difference in milliseconds
-          const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));      // convert milliseconds to days
-          
+
+          const creationDate = new Date( creationTimestamp );
+          const currentDate = new Date( currentTimestamp );
+
+          const diffInMs = Math.abs( currentDate - creationDate );      // calculate difference in milliseconds
+          const diffInDays = Math.floor( diffInMs / ( 1000 * 60 * 60 * 24 ) );      // convert milliseconds to days
+
           // fetch password expiry limit
           let expiryLimit;
           try {
-            expiryLimit = await this.getPasswordExpiryLimit(config);
-            if (expiryLimit === 0) return null; 
-          } catch (error) {
-            return Promise.reject(error);
+            expiryLimit = await this.getPasswordExpiryLimit( config );
+            if ( expiryLimit === 0 ) return null;
+          } catch ( error ) {
+            return Promise.reject( error );
           }
 
           // calculate expiry date
           const expiryTimestamp = creationTimestamp + expiryLimit * 24 * 60 * 60 * 1000;
-          const expiryDate = new Date(expiryTimestamp);
-          const convertedExpiryTime = expiryDate.toLocaleDateString('en-US');
+          const expiryDate = new Date( expiryTimestamp );
+          const convertedExpiryTime = expiryDate.toLocaleDateString( 'en-US' );
 
           // calculate remaining days to show warning/message
-          const remainingDays = expiryLimit - diffInDays;      
-          if(remainingDays > 0 && remainingDays <= this.keycloakConfig["PASSWORD_EXPIRY_WARNING_LIMIT"]){
-            return Promise.resolve(`Please update your password. It will expire in ${remainingDays} day(s), on ${convertedExpiryTime}.`);
+          const remainingDays = expiryLimit - diffInDays;
+          if ( remainingDays > 0 && remainingDays <= this.keycloakConfig[ "PASSWORD_EXPIRY_WARNING_LIMIT" ] ) {
+            return Promise.resolve( `Please update your password. It will expire in ${remainingDays} day(s), on ${convertedExpiryTime}.` );
           }
-          return Promise.resolve(null);
-  
-        } catch (error) {
-          error = await errorService.handleError(error);
-          return Promise.reject({
+          return Promise.resolve( null );
+
+        } catch ( error ) {
+          error = await errorService.handleError( error );
+          return Promise.reject( {
             error_message: "Error occured while fetching User Credentials.",
             error_detail: error
-          });
-        }  
-      } catch (error) {
+          } );
+        }
+      } catch ( error ) {
         error.error_message = "Error occurred while fetching user details during Password Expiration check.";
-        return Promise.reject(error);
-      }        
-    } catch (error) {
-      error = await errorService.handleError(error);
-      return Promise.reject({
+        return Promise.reject( error );
+      }
+    } catch ( error ) {
+      error = await errorService.handleError( error );
+      return Promise.reject( {
         error_message: "Admin Token Generation Error: Failed to generate an admin access token during Password Expiration check.",
         error_detail: error
-      });
+      } );
     }
   }
 
   // function to fetch password expiry limit from realm settings
-  async getPasswordExpiryLimit(config){
-    config.url = this.keycloakConfig["auth-server-url"] + "admin/realms/" + this.keycloakConfig["realm"];
+  async getPasswordExpiryLimit( config ) {
+    config.url = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ];
     try {
-      const realmDetails = await requestController.httpRequest(config, true);
-      if(realmDetails.data.passwordPolicy){
+      const realmDetails = await requestController.httpRequest( config, true );
+      if ( realmDetails.data.passwordPolicy ) {
         const passwordPolicy = realmDetails.data.passwordPolicy;
 
         // regex to extract days for password expiration
         const regex = /forceExpiredPasswordChange\((\d+)\)/;
-        const match = passwordPolicy.match(regex);
-  
-        if (match) {
-          return parseInt(match[1], 10);
+        const match = passwordPolicy.match( regex );
+
+        if ( match ) {
+          return parseInt( match[ 1 ], 10 );
         } else {
           return 0;
-        }  
+        }
       }
       return 0;
-    } catch (error) {
-      error = await errorService.handleError(error);
-      return Promise.reject({
+    } catch ( error ) {
+      error = await errorService.handleError( error );
+      return Promise.reject( {
         error_message: "Error occured while fetching realm settings during password expiration check.",
         error_detail: error
-      });
+      } );
     }
   }
 
