@@ -735,6 +735,61 @@ class KeycloakService extends Keycloak {
     }
   }
 
+  // function for fetching password policies to be displayed on frontend
+  async getPasswordPolicies(){
+    const result = { policies: [] };
+    try {
+      // get admin token to fetch password policies
+      const adminData = await this.getAccessToken(this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN);
+      const adminToken = adminData.access_token;
+
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ];
+      let config = {
+        method: "get",
+        url: URL,
+        headers: {
+          Accept: "application/json",
+          "cache-control": "no-cache",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": "Bearer " + adminToken
+        }
+      }
+
+      try {
+        // get realm settings to fetch passwordPolicies
+        const realmInfo = await requestController.httpRequest( config, true );
+        const passwordPolicies = realmInfo.data.passwordPolicy;
+
+        if (!passwordPolicies) return Promise.resolve({ result });      // if no policy is set
+
+        // fetch policies from string and construct json response
+        const policies = passwordPolicies.split(" and ").filter(Boolean);
+        policies.forEach( policy => {
+          const match = policy.match(/^(\w+)\(([\s\S]*)\)$/);
+          if (!match) return;
+          const [, type, value] = match;
+          result.policies.push({ type, value: value === "undefined" ? "" : value });
+        });
+
+      } catch (error) {
+
+        let error_message = "An error occurred while fetching password policies.";
+        let error_detail = await errorService.handleError(error);
+        return Promise.reject({ error_message, error_detail });
+
+      }
+      
+    } catch (error) {
+
+      error.error_message = "Admin Token Generation Error: Failed to generate an admin access token while fetching password policies."
+      return Promise.reject(error)
+
+    }
+
+    return Promise.resolve(result)     
+
+  }
+
   // function to check the password expiration and return a warning/message
   async checkPasswordExpiration( username ) {
     try {
