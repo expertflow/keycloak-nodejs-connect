@@ -674,6 +674,29 @@ class KeycloakService extends Keycloak {
         const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN );
         const adminToken = adminData.access_token;
 
+        // check if password age policy is satisfied OR user is eligible to update password
+        if(this.keycloakConfig["MINIMUM_PASSWORD_AGE_IN_HOURS"]){
+          try {
+            const passwordAgePolicyDetails = await this.getPasswordAgePolicyDetails(adminToken, username);
+            if (passwordAgePolicyDetails) {
+              const passwordAge = this.keycloakConfig["MINIMUM_PASSWORD_AGE_IN_HOURS"];
+              const passwordAgeInDays = passwordAge % 24 === 0 ? passwordAge / 24 : null;
+              const dayInfo = passwordAgeInDays
+                ? `(${passwordAgeInDays} ${passwordAgeInDays > 1 ? 'days' : 'day'}) `
+                : '';
+              return Promise.reject({
+                error_message: "An error occurred while updating the password. Please try later.",
+                error_detail: {
+                  status: 403,
+                  reason: `Password must be at least ${passwordAge} hours ${dayInfo}old before updating. You can change your password on or after ${passwordAgePolicyDetails.eligibleToUpdatePasswordAt}.`,
+                },
+              });
+            }
+          } catch (error) {
+            return Promise.reject(error); 
+          }
+        }
+
         // fetching userId from Keycloak to update the password        
         try {
           const usersData = await this.getUserDetails( adminToken, username );
@@ -720,7 +743,7 @@ class KeycloakService extends Keycloak {
         } catch ( error ) {
           let err = await errorService.handleError( error );
           return Promise.reject( {
-            error_message: "Error occurred while fetching user attributes.",
+            error_message: "Error occurred while fetching user attributes during password update.",
             error_detail: err,
           } );
         }
@@ -736,7 +759,7 @@ class KeycloakService extends Keycloak {
   }
 
   // function for fetching password policies to be displayed on frontend
-  async getPasswordPolicies() {
+  async getPasswordPolicies(username){
     const result = { policies: [] };
     try {
       // get admin token to fetch password policies
@@ -760,7 +783,21 @@ class KeycloakService extends Keycloak {
         const realmInfo = await requestController.httpRequest( config, true );
         const passwordPolicies = realmInfo.data.passwordPolicy;
 
-        if ( !passwordPolicies ) return Promise.resolve( { result } );      // if no policy is set
+        // check and return details if password age policy is configured
+        if( this.keycloakConfig["MINIMUM_PASSWORD_AGE_IN_HOURS"] ){
+          try {
+            const passwordAgePolicyDetails = await this.getPasswordAgePolicyDetails(adminToken, username);
+            if(passwordAgePolicyDetails){
+              Object.entries(passwordAgePolicyDetails).forEach( ([key, value]) => {
+                result.policies.push({ type: key, value: value });
+              });        
+            }
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }
+
+        if (!passwordPolicies) return Promise.resolve( result );      // if no policy is set
 
         // fetch policies from string and construct json response
         const policies = passwordPolicies.split( " and " ).filter( Boolean );
@@ -892,6 +929,69 @@ class KeycloakService extends Keycloak {
         error_message: "Error occured while fetching realm settings during password expiration check.",
         error_detail: error
       } );
+    }
+  }
+
+  // function to fetch password age policy details
+  async getPasswordAgePolicyDetails(adminToken, username){
+    try {
+      const userDetails = await this.getUserDetails(adminToken, username);      // fetch userId
+      const userId = userDetails.id;
+
+      let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId + "/credentials";
+      let config = {
+        method: "get",
+        url: URL,
+        headers: {
+          Accept: "application/json",
+          "cache-control": "no-cache",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": "Bearer " + adminToken
+        }
+      };
+
+      try {
+        // fetch user credentials' details and calculate password age
+        const credentialsDetails = await requestController.httpRequest( config, true );
+        const creationTimestamp = credentialsDetails.data[ 0 ].createdDate;
+        const currentTimestamp = Date.now();
+
+        const creationDate = new Date( creationTimestamp );
+        const currentDate = new Date( currentTimestamp );
+
+        const diffInMs = Math.abs( currentDate - creationDate );      // difference in ms
+        const diffInHours = Math.floor( diffInMs / ( 1000 * 60 * 60 ) );      // ms to hours
+        const minPasswordAgeInMs = this.keycloakConfig['MINIMUM_PASSWORD_AGE_IN_HOURS'] * 60 * 60 * 1000; // hours to ms
+
+        if(diffInHours < this.keycloakConfig['MINIMUM_PASSWORD_AGE_IN_HOURS']){
+          // calculate the eligibility date/time by adding MINIMUM_PASSWORD_AGE_IN_HOURS to the creationDate
+          const eligibleToUpdatePasswordDate = new Date(creationDate.getTime() + minPasswordAgeInMs);
+
+          // response object containing necessary password age policy details
+          let response = {
+              'passwordCreatedAt': creationDate.toLocaleString(),
+              'minPasswordAgeInHours': this.keycloakConfig['MINIMUM_PASSWORD_AGE_IN_HOURS'],
+              'eligibleToUpdatePasswordAt': eligibleToUpdatePasswordDate.toLocaleString()
+          };
+
+          return Promise.resolve(response)
+
+        }
+
+        // return null when no password age policy is configured
+        return Promise.resolve()
+
+      } catch (error) {
+        error = await errorService.handleError( error );
+        return Promise.reject( {
+          error_message: "User Credentials Error: Unable to fetch user credentials while getting Password Age Policy details.",
+          error_detail: error
+        } );
+      }
+
+    } catch (error) {
+      error.error_message = 'User Details Error: Unable to fetch user information while getting Password Age Policy details.'
+      return Promise.reject(error)
     }
   }
 
