@@ -40,6 +40,7 @@ This adapter is extended from keycloak-connect and have functionalities of both 
   - getRealmRoles
   - assignRoleToUser
   - authenticateFinesse
+  - externalServiceSso
   - createRealmAsTenant
   
 ```
@@ -95,6 +96,7 @@ Sample `config` is given below:
   "bearer-only": true,
   "TWILIO_SID": "yourTwilioSID",
   "TWILIO_AUTH_TOKEN": "yourTwilioAuthToken",
+  "EXTERNAL_USER_PASSWORD": "external_service_user_password",
   "TWILIO_VERIFY_SID": "yourTwilioVerifySID",
   "ef-server-url": "https://<cx instance fqdn>/unified-admin/",
   "FINESSE_USERNAME_ADMIN": "<cisco admin username>",
@@ -124,6 +126,7 @@ Here is the definition of each property defined in config file/object.
 - **SCOPE_NAME:** Keycloak Client App scope to use as default scope during Authorization.
 - **bearer-only:** Will keep its value as **true** (This should be set to true for services. If enabled the adapter will not attempt to authenticate users, but only verify bearer tokens. This is OPTIONAL. The default value is false.)
 - **TWILIO_SID:** Your Twilio Account SID.
+- **EXTERNAL_USER_PASSWORD**: While syncing external service user to keycloak, this password value will be assigned as password to it.
 - **TWILIO_AUTH_TOKEN:** Your Twilio account's Auth Token.
 - **TWILIO_VERIFY_SID:** Your Twilio account's Verify Service's SID.
 - *(Each property having TWILIO in its name is optional and is required only in the case of 2FA via SMS.)*
@@ -453,6 +456,39 @@ It takes 5 arguments:
         
  ##### Example of non SSO Finesse Auth:
       
+
+### externalServiceSso( userRolesArr, validationToken, externalServiceURL, type )
+
+This function sync external service user in keycloak, it first authenticates user/validate user from external service, then check for its existance in keycloak. If it exists in keycloak then generates an access_token along with role mapping and team mapping and return it to user. If user doesn't exist then it creates a user, assign it roles and team and return the access_token along with role mapping/team mapping for newly created user.
+
+It takes 4 arguments: 
+ - userRoles: The array containing user roles, it will be used to assign roles to external service user while synching it with Keycloak e.g **['agent']**.
+ - validationToken: acess token for external service user validation and to get user details.
+ - externalServiceURL: The url of external service server e.g in case of dynamics365: **'https://{fqdn}/api/data/v9.0'** , in case of salesforce: **'https://{salesforce service fqdn}.com'**
+ - type: Type of external service. In case of Dynamics365, the type is: **dynamics365**. In case of Salesforce, the type is: **salesforce**
+
+#### Example (Dynamics365)
+
+```js
+await keycloak.externalServiceSso( 
+  ['agent', 'supervisor'], 
+  'eyJ0eXAiOiJKV1QiLCJhbGci...', 
+  'https://yourcrm.dynamics.com/api/data/v9.0', 
+  'dynamics365' 
+);
+```
+
+#### Example (Salesforce)
+
+```js
+await keycloak.externalServiceSso( 
+  ['agent'], 
+  'eyJ0eXAiOiJKV1QiLCJhbGci...', 
+  'https://yourorg.salesforce.com', 
+  'salesforce' 
+);
+```
+
       authenticateFinesse('johndoe', '12345', `https://${finesse_server_url}:${port}`, ['agent','supervisor'], '')
 
 ### generateAccessTokenFromRefreshToken(refreshToken)

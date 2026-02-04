@@ -4,6 +4,7 @@ const fs = require( 'fs' );
 const Joi = require( "joi" );
 const qrcode = require( "qrcode" );
 const speakeasy = require( 'speakeasy' )
+const crypto = require( 'crypto' );
 const parseXMLString = require( "xml2js" ).parseString;
 
 let requestController = require( "../controller/requestController.js" );
@@ -17,11 +18,15 @@ const FinesseService = require( "./finesseService" );
 const TeamsService = require( "./teamsService" );
 const ErrorService = require( './errorService.js' );
 const CiscoSyncService = require( './ciscoSyncService.js' );
+const Dynamics365Service = require( './dynamics365Service.js' );
+const SalesforceService = require( './salesforceService.js' );
 
 const finesseService = new FinesseService();
 const teamsService = new TeamsService();
 const errorService = new ErrorService();
 const ciscoSyncService = new CiscoSyncService();
+const dynamics365Service = new Dynamics365Service();
+const salesforceService = new SalesforceService();
 
 class KeycloakService extends Keycloak {
 
@@ -44,8 +49,8 @@ class KeycloakService extends Keycloak {
 
       if ( twoFAConfigs?.is2FAEnabled ) {     // if 2FA is enabled then running the 2FA flow
         const twoFAChannel = twoFAConfigs.channelType;
-        const allowedChannels = ['APP', 'RSA', 'SMS', 'EMAIL'];
-        if ( !twoFAChannel || !allowedChannels.includes(twoFAChannel) ) {
+        const allowedChannels = [ 'APP', 'RSA', 'SMS', 'EMAIL' ];
+        if ( !twoFAChannel || !allowedChannels.includes( twoFAChannel ) ) {
           return Promise.reject( { status: 400, error_message: 'channelType is empty or invalid in 2FA configuration.' } )
         }
 
@@ -123,9 +128,9 @@ class KeycloakService extends Keycloak {
           tempToken.is2FARegistered = true
           tempToken.twoFAChannel = attributesFromToken.twoFAChannel[ 0 ]
           tempToken.message = "OTP required."
-          
-          let otpManagerSupportedChannels = ["SMS", "EMAIL"]
-          if ( otpManagerSupportedChannels.includes(attributesFromToken.twoFAChannel[0]) ) {
+
+          let otpManagerSupportedChannels = [ "SMS", "EMAIL" ]
+          if ( otpManagerSupportedChannels.includes( attributesFromToken.twoFAChannel[ 0 ] ) ) {
             if ( !attributesFromToken.customerChannelIdentifier ) {
               return Promise.reject( {
                 error: 404,
@@ -133,20 +138,20 @@ class KeycloakService extends Keycloak {
               } )
             }
 
-            twoFAConfigs.customerChannelIdentifier = attributesFromToken.customerChannelIdentifier[0]
+            twoFAConfigs.customerChannelIdentifier = attributesFromToken.customerChannelIdentifier[ 0 ]
             try {
-              await this.sendOTPviaOTPManager( user_name, twoFAConfigs )            
-            } catch (error) {
-              return Promise.reject({
+              await this.sendOTPviaOTPManager( user_name, twoFAConfigs )
+            } catch ( error ) {
+              return Promise.reject( {
                 error_message: 'An error occured while sending OTP via OTP Manager.',
                 error_detail: error
-              })
+              } )
             }
 
-            if( attributesFromToken.twoFAChannel[0]=='SMS' )
+            if ( attributesFromToken.twoFAChannel[ 0 ] == 'SMS' )
               tempToken.phoneNumber = attributesFromToken.customerChannelIdentifier[ 0 ]
             else
-              tempToken.email = attributesFromToken.customerChannelIdentifier[0]
+              tempToken.email = attributesFromToken.customerChannelIdentifier[ 0 ]
           }
 
           // deleting otpSecret from response
@@ -457,8 +462,8 @@ class KeycloakService extends Keycloak {
     return /^\d{7,15}$/.test( phoneNumber );
   }
 
-  isValidEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  isValidEmail( email ) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test( email );
   }
 
   // function for binding/registering phone number or email with user in Keycloak attributes - (callable from frontend)
@@ -496,12 +501,12 @@ class KeycloakService extends Keycloak {
         newAttributes.appName = appName
         newAttributes.tenantId = tenantId
         try {
-          await this.sendOTPviaOTPManager( username, newAttributes )          
-        } catch (error) {
-          return Promise.reject({
+          await this.sendOTPviaOTPManager( username, newAttributes )
+        } catch ( error ) {
+          return Promise.reject( {
             error_message: 'An error occured while sending OTP via OTP Manager during customerChannelIdentifier registration.',
             error_detail: error
-          })
+          } )
         }
 
       } catch ( error ) {
@@ -516,8 +521,8 @@ class KeycloakService extends Keycloak {
 
     // updating userObject that is returned to frontend
     userObjectToBeReturned.is2FARegistered = false
-    userObjectToBeReturned.twoFAChannel = userObject.attributes.twoFAChannel[0]
-    userObject.attributes.twoFAChannel[0] == 'SMS' 
+    userObjectToBeReturned.twoFAChannel = userObject.attributes.twoFAChannel[ 0 ]
+    userObject.attributes.twoFAChannel[ 0 ] == 'SMS'
       ? userObjectToBeReturned.phoneNumber = customerChannelId
       : userObjectToBeReturned.email = customerChannelId
     userObjectToBeReturned.message = 'OTP required'
@@ -525,12 +530,12 @@ class KeycloakService extends Keycloak {
     return userObjectToBeReturned
   }
 
-  async sendOTPviaOTPManager(username, twoFAData) {
+  async sendOTPviaOTPManager( username, twoFAData ) {
     const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN )
     const adminToken = adminData.access_token
 
     let userObject = await this.getUserDetails( adminToken, username )
-    let customerChannelIdentifier = userObject.attributes.customerChannelIdentifier[0]
+    let customerChannelIdentifier = userObject.attributes.customerChannelIdentifier[ 0 ]
 
     let URL = this.keycloakConfig[ "Otp_Manager_Url" ] + "otp/generate";
     let config = {
@@ -553,14 +558,14 @@ class KeycloakService extends Keycloak {
 
     let otpManagerResponse;
     try {
-      otpManagerResponse = await requestController.httpRequest(config, false);
-    } catch (error) {
-      return Promise.reject(error.response.data)
+      otpManagerResponse = await requestController.httpRequest( config, false );
+    } catch ( error ) {
+      return Promise.reject( error.response.data )
     }
-    return Promise.resolve(otpManagerResponse.data)
+    return Promise.resolve( otpManagerResponse.data )
   }
 
-  async verifyOTPviaOTPManager(twoFAData, otp, appName, tenantId){
+  async verifyOTPviaOTPManager( twoFAData, otp, appName, tenantId ) {
     let URL = this.keycloakConfig[ "Otp_Manager_Url" ] + "otp/verify";
     let config = {
       method: "post",
@@ -580,11 +585,11 @@ class KeycloakService extends Keycloak {
 
     let otpManagerResponse;
     try {
-      otpManagerResponse = await requestController.httpRequest(config, false);
-    } catch (error) {
-      return Promise.reject(error.response.data)
+      otpManagerResponse = await requestController.httpRequest( config, false );
+    } catch ( error ) {
+      return Promise.reject( error.response.data )
     }
-    return Promise.resolve(otpManagerResponse.data)
+    return Promise.resolve( otpManagerResponse.data )
   }
 
   // function for validating OTP sent through authenticator app or SMS - (callable from frontend)
@@ -670,7 +675,7 @@ class KeycloakService extends Keycloak {
       }
 
       // running OTP validation flow for SMS and Email
-      else if ( ["SMS", "EMAIL"].includes(userAttributes?.twoFAChannel[ 0 ]) ) {
+      else if ( [ "SMS", "EMAIL" ].includes( userAttributes?.twoFAChannel[ 0 ] ) ) {
         try {
           let twoFAConfigs = {}
 
@@ -681,8 +686,8 @@ class KeycloakService extends Keycloak {
             }
           }
 
-          await this.verifyOTPviaOTPManager(twoFAConfigs, otpToValidate, appName, tenantId)
-          
+          await this.verifyOTPviaOTPManager( twoFAConfigs, otpToValidate, appName, tenantId )
+
           // updating user attributes if he is registering for 2FA using SMS or Email OTP
           if ( userAttributes.is2FARegistered[ 0 ] == 'false' ) {
             twoFAConfigs.is2FARegistered = true
@@ -691,21 +696,21 @@ class KeycloakService extends Keycloak {
 
         } catch ( error ) {
           let error_message = 'An error occured while verifying OTP via OTP Manager.'
-          if (error.message == 'OTP_INVALID') error_message = 'Invalid verification code. Please try again.'
-          else if(error.message == 'OTP_EXPIRED') error_message = 'This verification code has expired. Please request a new one.'
-          else if(error.message == 'OTP_MAX_ATTEMPTS') error_message = 'Too many incorrect attempts. Verification has been temporarily blocked.'
+          if ( error.message == 'OTP_INVALID' ) error_message = 'Invalid verification code. Please try again.'
+          else if ( error.message == 'OTP_EXPIRED' ) error_message = 'This verification code has expired. Please request a new one.'
+          else if ( error.message == 'OTP_MAX_ATTEMPTS' ) error_message = 'Too many incorrect attempts. Verification has been temporarily blocked.'
 
-          return Promise.reject({
+          return Promise.reject( {
             error_message: error_message,
             error_detail: error
-          })
+          } )
         }
       }
     }
     else return Promise.reject( { error: 400, error_message: 'Error occurred while fetching user attributes.' } )
-    
+
     const userToken = await this.authenticateUserViaKeycloak( username, password, realm )
-    
+
     // deleting twoFAConfigs data from response
     delete userToken.keycloak_User.attributes.otpSecret
     delete userToken.keycloak_User.attributes.tempOTPSecret
@@ -747,25 +752,25 @@ class KeycloakService extends Keycloak {
         const adminToken = adminData.access_token;
 
         // check if password age policy is satisfied OR user is eligible to update password
-        if(this.keycloakConfig["MINIMUM_PASSWORD_AGE_IN_HOURS"]){
+        if ( this.keycloakConfig[ "MINIMUM_PASSWORD_AGE_IN_HOURS" ] ) {
           try {
-            const passwordAgePolicyDetails = await this.getPasswordAgePolicyDetails(adminToken, username);
-            if (passwordAgePolicyDetails) {
-              const passwordAge = this.keycloakConfig["MINIMUM_PASSWORD_AGE_IN_HOURS"];
+            const passwordAgePolicyDetails = await this.getPasswordAgePolicyDetails( adminToken, username );
+            if ( passwordAgePolicyDetails ) {
+              const passwordAge = this.keycloakConfig[ "MINIMUM_PASSWORD_AGE_IN_HOURS" ];
               const passwordAgeInDays = passwordAge % 24 === 0 ? passwordAge / 24 : null;
               const dayInfo = passwordAgeInDays
                 ? `(${passwordAgeInDays} ${passwordAgeInDays > 1 ? 'days' : 'day'}) `
                 : '';
-              return Promise.reject({
+              return Promise.reject( {
                 error_message: "An error occurred while updating the password. Please try later.",
                 error_detail: {
                   status: 403,
                   reason: `Password must be at least ${passwordAge} hours ${dayInfo}old before updating. You can change your password on or after ${passwordAgePolicyDetails.eligibleToUpdatePasswordAt}.`,
                 },
-              });
+              } );
             }
-          } catch (error) {
-            return Promise.reject(error); 
+          } catch ( error ) {
+            return Promise.reject( error );
           }
         }
 
@@ -831,7 +836,7 @@ class KeycloakService extends Keycloak {
   }
 
   // function for fetching password policies to be displayed on frontend
-  async getPasswordPolicies(username){
+  async getPasswordPolicies( username ) {
     const result = { policies: [] };
     try {
       // get admin token to fetch password policies
@@ -856,20 +861,20 @@ class KeycloakService extends Keycloak {
         const passwordPolicies = realmInfo.data.passwordPolicy;
 
         // check and return details if password age policy is configured
-        if( this.keycloakConfig["MINIMUM_PASSWORD_AGE_IN_HOURS"] ){
+        if ( this.keycloakConfig[ "MINIMUM_PASSWORD_AGE_IN_HOURS" ] ) {
           try {
-            const passwordAgePolicyDetails = await this.getPasswordAgePolicyDetails(adminToken, username);
-            if(passwordAgePolicyDetails){
-              Object.entries(passwordAgePolicyDetails).forEach( ([key, value]) => {
-                result.policies.push({ type: key, value: value });
-              });        
+            const passwordAgePolicyDetails = await this.getPasswordAgePolicyDetails( adminToken, username );
+            if ( passwordAgePolicyDetails ) {
+              Object.entries( passwordAgePolicyDetails ).forEach( ( [ key, value ] ) => {
+                result.policies.push( { type: key, value: value } );
+              } );
             }
-          } catch (error) {
-            return Promise.reject(error);
+          } catch ( error ) {
+            return Promise.reject( error );
           }
         }
 
-        if (!passwordPolicies) return Promise.resolve( result );      // if no policy is set
+        if ( !passwordPolicies ) return Promise.resolve( result );      // if no policy is set
 
         // fetch policies from string and construct json response
         const policies = passwordPolicies.split( " and " ).filter( Boolean );
@@ -1005,9 +1010,9 @@ class KeycloakService extends Keycloak {
   }
 
   // function to fetch password age policy details
-  async getPasswordAgePolicyDetails(adminToken, username){
+  async getPasswordAgePolicyDetails( adminToken, username ) {
     try {
-      const userDetails = await this.getUserDetails(adminToken, username);      // fetch userId
+      const userDetails = await this.getUserDetails( adminToken, username );      // fetch userId
       const userId = userDetails.id;
 
       let URL = this.keycloakConfig[ "auth-server-url" ] + "admin/realms/" + this.keycloakConfig[ "realm" ] + "/users/" + userId + "/credentials";
@@ -1033,27 +1038,27 @@ class KeycloakService extends Keycloak {
 
         const diffInMs = Math.abs( currentDate - creationDate );      // difference in ms
         const diffInHours = Math.floor( diffInMs / ( 1000 * 60 * 60 ) );      // ms to hours
-        const minPasswordAgeInMs = this.keycloakConfig['MINIMUM_PASSWORD_AGE_IN_HOURS'] * 60 * 60 * 1000; // hours to ms
+        const minPasswordAgeInMs = this.keycloakConfig[ 'MINIMUM_PASSWORD_AGE_IN_HOURS' ] * 60 * 60 * 1000; // hours to ms
 
-        if(diffInHours < this.keycloakConfig['MINIMUM_PASSWORD_AGE_IN_HOURS']){
+        if ( diffInHours < this.keycloakConfig[ 'MINIMUM_PASSWORD_AGE_IN_HOURS' ] ) {
           // calculate the eligibility date/time by adding MINIMUM_PASSWORD_AGE_IN_HOURS to the creationDate
-          const eligibleToUpdatePasswordDate = new Date(creationDate.getTime() + minPasswordAgeInMs);
+          const eligibleToUpdatePasswordDate = new Date( creationDate.getTime() + minPasswordAgeInMs );
 
           // response object containing necessary password age policy details
           let response = {
-              'passwordCreatedAt': creationDate.toLocaleString(),
-              'minPasswordAgeInHours': this.keycloakConfig['MINIMUM_PASSWORD_AGE_IN_HOURS'],
-              'eligibleToUpdatePasswordAt': eligibleToUpdatePasswordDate.toLocaleString()
+            'passwordCreatedAt': creationDate.toLocaleString(),
+            'minPasswordAgeInHours': this.keycloakConfig[ 'MINIMUM_PASSWORD_AGE_IN_HOURS' ],
+            'eligibleToUpdatePasswordAt': eligibleToUpdatePasswordDate.toLocaleString()
           };
 
-          return Promise.resolve(response)
+          return Promise.resolve( response )
 
         }
 
         // return null when no password age policy is configured
         return Promise.resolve()
 
-      } catch (error) {
+      } catch ( error ) {
         error = await errorService.handleError( error );
         return Promise.reject( {
           error_message: "User Credentials Error: Unable to fetch user credentials while getting Password Age Policy details.",
@@ -1061,9 +1066,9 @@ class KeycloakService extends Keycloak {
         } );
       }
 
-    } catch (error) {
+    } catch ( error ) {
       error.error_message = 'User Details Error: Unable to fetch user information while getting Password Age Policy details.'
-      return Promise.reject(error)
+      return Promise.reject( error )
     }
   }
 
@@ -3257,6 +3262,164 @@ class KeycloakService extends Keycloak {
     } );
   }
 
+  async externalServiceSso( userRolesArr, validationToken, externalServiceURL, type ) {
+
+    return new Promise( async ( resolve, reject ) => {
+
+      //Authentication of External Service User, it returns a status code 200 if user found and 401 if unauthorized.
+      let externalServiceLoginResponse = {};
+
+      try {
+        //Handle finesse error cases correctly. (for later)
+        if ( Object.keys( externalServiceLoginResponse ).length === 0 ) {
+
+          if ( type == 'dynamics365' ) {
+            externalServiceLoginResponse = await dynamics365Service.authenticateUserViaDynamics365( validationToken, externalServiceURL );
+
+          } else if ( type == 'salesforce' ) {
+
+            externalServiceLoginResponse = await salesforceService.authenticateUserViaSalesforce( validationToken, externalServiceURL );
+          }
+
+        }
+
+        //If user is SSO then password is not provided, we are setting up a pre-defined password.
+        externalServiceLoginResponse.data.password = this.keycloakConfig[ "EXTERNAL_USER_PASSWORD" ];
+
+        let authenticatedByKeycloak = false;
+        let keycloakAuthToken = null;
+        let keycloakAdminToken = null;
+        let updateUserPromise = null;
+
+
+        if ( externalServiceLoginResponse?.status == 200 ) {
+
+          externalServiceLoginResponse?.data?.roles = userRolesArr;
+          externalServiceLoginResponse?.data?.type = type;
+
+          let trimmedUsername;
+
+          if ( type == 'dynamics365' ) {
+
+            trimmedUsername = externalServiceLoginResponse?.data?.fullname.trim().split( ' ' )[ 0 ]; // Removes leading/trailing spaces
+            externalServiceLoginResponse?.data?.fullname = trimmedUsername;
+          } else if ( type == 'salesforce' ) {
+
+            trimmedUsername = externalServiceLoginResponse?.data?.preferred_username.trim().split( ' ' )[ 0 ]; // Removes leading/trailing spaces
+            externalServiceLoginResponse?.data?.fullname = trimmedUsername;
+            externalServiceLoginResponse?.data?.username = trimmedUsername;
+          }
+
+          try {
+
+            //Fetching admin token, we pass it in our "Create User" API for authorization
+            keycloakAdminToken = await this.getAccessToken( this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
+
+            try {
+
+              //Checking whether finesse user already exist in keycloak and fetch its token
+              keycloakAuthToken = await this.getAccessToken( externalServiceLoginResponse?.data?.fullname, externalServiceLoginResponse?.data?.password, this.keycloakConfig[ "realm" ] );
+              authenticatedByKeycloak = true;
+
+              if ( !updateUserPromise ) {
+
+                updateUserPromise = this.updateUser( externalServiceLoginResponse?.data, keycloakAdminToken, keycloakAuthToken, externalServiceLoginResponse?.data?.username, externalServiceLoginResponse?.data?.password )
+                  .then( async ( updatedUser ) => {
+
+                    //Calling the Introspect function twice so all the asynchronous operations inside updateUser function are done
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( externalServiceLoginResponse?.data?.username, externalServiceLoginResponse?.data?.password, this.keycloakConfig[ "realm" ], 'CISCO' );
+                  } )
+                  .catch( ( err ) => {
+
+                    reject( err );
+                  } );
+              }
+
+
+            } catch ( err ) {
+
+              if ( err.error_detail ) {
+
+                if ( err.error_detail.status == 401 ) {
+
+                  console.log( "User Not Found in Keycloak: The user does not exist in Keycloak. Syncing Finesse user in Keycloak." );
+                } else {
+
+                  reject( err );
+                }
+              } else {
+
+                reject( err );
+              }
+
+            }
+          } catch ( err ) {
+
+            let error = await errorService.handleError( err );
+
+            reject( {
+
+              error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the authenticate/sync external service user component.",
+              error_detail: error
+            } );
+
+
+          } finally {
+
+            //Finesse User not found in keycloak, so we are going to create one.
+            if ( !authenticatedByKeycloak ) {
+
+              if ( keycloakAdminToken?.access_token ) {
+
+                try {
+
+                  //Creating Finesse User inside keycloak.
+                  let userCreated = await this.createUser( externalServiceLoginResponse?.data, keycloakAdminToken?.access_token );
+
+                  if ( userCreated.status == 201 ) {
+
+                    //Returning the token of recently created User
+                    keycloakAuthToken = await this.getKeycloakTokenWithIntrospect( ( externalServiceLoginResponse?.data?.fullname ).toLowerCase(), externalServiceLoginResponse?.data?.password, this.keycloakConfig[ "realm" ], 'CISCO' );
+                  }
+
+                } catch ( err ) {
+                  console.log( err );
+
+
+                  let error = await errorService.handleError( err );
+
+                  reject( {
+
+                    error_message: "External Service User Creation Error: An error occurred while creating the external service user in keycloak during the authenticate/sync user component.",
+                    error_detail: error
+                  } );
+
+                }
+              }
+            }
+          }
+
+          if ( updateUserPromise ) {
+            await updateUserPromise; // Wait for the updateUser promise to resolve
+            updateUserPromise = null; // Reset the promise
+          }
+
+          resolve( keycloakAuthToken );
+        } else {
+
+          resolve( externalServiceLoginResponse );
+        }
+
+
+      } catch ( er ) {
+
+        reject( er );
+      }
+
+
+    } );
+  }
+
   //Create a Finesse user during login.
   async createUser( userObject, token ) {
 
@@ -3272,23 +3435,27 @@ class KeycloakService extends Keycloak {
 
       let data = {
 
-        username: userObject.username,
-        firstName: userObject.firstName,
-        lastName: userObject.lastName,
+        username: ( userObject?.type == "dynamics365" ) ? userObject?.fullname : ( userObject?.type == "salesforce" ) ? userObject?.preferred_username : userObject?.username,
+        firstName: ( userObject?.type == "dynamics365" ) ? userObject?.firstname : ( userObject?.type == "salesforce" ) ? userObject?.given_name : userObject?.firstName,
+        lastName: ( userObject?.type == "dynamics365" ) ? userObject?.lastname : ( userObject?.type == "salesforce" ) ? userObject?.family_name : userObject?.lastName,
+        email: ( userObject?.type == "dynamics365" ) ? userObject?.internalemailaddress : ( userObject?.type == "salesforce" ) ? userObject?.email : '',
         enabled: true,
         credentials: [
           {
             type: "password",
-            value: userObject.password,
+            value: userObject?.password,
             temporary: false,
           },
         ],
         attributes: {
-          "user_name": `${userObject.loginName}`,
-          "extension": `${userObject.extension}`
+          "user_name": `${( userObject?.type == "salesforce" ) ? userObject?.name : ( userObject?.loginName ) ? userObject?.loginName : ''}`,
+          "extension": `${( userObject?.extension ) ? userObject?.extension : 'CISCO'}`
         },
         groups: assignGroups
       };
+
+      userObject?.type == "salesforce" && ( data.attributes.userid = userObject?.user_id );
+      userObject?.type == "dynamics365" && ( data.attributes.userid = userObject?.ownerid );
 
       let config = {
 
@@ -3314,7 +3481,7 @@ class KeycloakService extends Keycloak {
         //Get list of all the roles in keycloak realm
         /* Storing all the realm roles in Global realmRoles list.If some role come from finesse which doesn't
         exist in realmRoles list then we call keycloak roles api again to update realmRoles list. */
-        if ( userObject.roles != [] ) {
+        if ( ( Array.isArray( userObject.roles ) && userObject.roles.length > 0 ) ) {
 
           if ( realmRoles.length > 0 ) {
 
@@ -3363,7 +3530,97 @@ class KeycloakService extends Keycloak {
         }
 
 
-        let ciscoTeamId = userObject.group.id;
+        if ( userObject?.type == "dynamics365" || userObject?.type == "salesforce" ) {
+
+          let tempUrl1 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
+
+          let tempConfig1 = {
+
+            url: tempUrl1,
+            method: "get",
+            headers: {
+              Accept: "application/json",
+              "cache-control": "no-cache",
+              "Content-Type": "application/x-www-form-urlencoded",
+              Authorization: `Bearer ${token}`
+            }
+
+          };
+
+          try {
+
+            let getTeamsList = await requestController.httpRequest( tempConfig1, false );
+
+            // Access the actual array of teams from the .data property.
+            const teamsData = getTeamsList?.data;
+
+            // Check if the teamsData array is empty or not an array.
+            if ( !Array.isArray( teamsData ) || teamsData.length === 0 ) {
+
+              console.log( "teamsData array is empty or invalid. Assigning 1 to userObject.group.id." );
+              userObject.group.id = 1;
+
+            } else {
+
+              const findDefaultTeamId = ( teamsArray ) => {
+
+                // Rule 1: Find a team with team_name "default" (case-insensitive).
+                const defaultTeam = teamsArray.find(
+                  ( team ) => team.team_name && team.team_name.toLowerCase() === "default"
+                );
+
+                if ( defaultTeam ) {
+                  console.log( 'Rule 1 matched: Found team with name "default".' );
+                  return defaultTeam.team_Id;
+                }
+
+                console.log( 'Rule 1 failed: No team with name "default" found.' );
+
+                // Rule 2: If no "default" team, find a team with team_Id of 1 whose name is NOT "default".
+                const teamWithIdOne = teamsArray.find(
+                  ( team ) =>
+                    ( team.team_Id === 1 || team.team_Id === "1" ) &&
+                    team.team_name?.toLowerCase() !== "default"
+                );
+
+                if ( teamWithIdOne ) {
+                  console.log( "Rule 2 matched: Found a team with team_Id of 1 and a non-default name." );
+                  return crypto.randomUUID();
+                }
+
+                console.log( "Rule 2 failed: No suitable team with team_Id of 1 found." );
+
+                // Rule 3: If no default team was found and no suitable team with ID 1 was found, return a random ID.
+                console.log( "Rule 3 matched: Defaulting to a new random UUID." );
+                return crypto.randomUUID();
+              };
+
+              // Call the function with the fetched list of teams
+              const defaultTeamId = findDefaultTeamId( teamsData );
+
+              // Assign the resulting ID to the userObject
+              userObject.groupId = defaultTeamId;
+
+              // You can now use the 'defaultTeamId' variable and the updated userObject
+              console.log( `The determined default Team ID is: ${defaultTeamId}` );
+            }
+
+          } catch ( er ) {
+
+            let error = await errorService.handleError( er );
+
+            reject( {
+
+              error_message: "External Service Team Sync Error: Error occured while checking for default team in CX.",
+              error_detail: error
+            } );
+          }
+
+        }
+
+        ( userObject?.type == "dynamics365" || userObject?.type == "salesforce" ) && ( userObject.groupName = "default" );
+
+        let ciscoTeamId = ( userObject?.type == "dynamics365" || userObject?.type == "salesforce" ) ? userObject.groupId : userObject.group.id;
 
         //Check whether team of Agent already exists in CX Core or not
         let URL1 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
@@ -3407,8 +3664,8 @@ class KeycloakService extends Keycloak {
             let URL2 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
             let data = {
-              "team_Id": userObject.group.id,
-              "team_name": userObject.group.name,
+              "team_Id": ( userObject?.type == "dynamics365" || userObject?.type == "salesforce" ) ? ciscoTeamId : userObject.group.id,
+              "team_name": ( userObject?.type == "dynamics365" || userObject?.type == "salesforce" ) ? userObject?.groupName : userObject.group.name,
               "supervisor_Id": "",
               "source": "CISCO",
               "created_by": "1"
@@ -3440,9 +3697,9 @@ class KeycloakService extends Keycloak {
 
           let data = {
             "id": userId,
-            "username": userObject.username.toLocaleLowerCase(),
-            "firstName": userObject.firstName,
-            "lastName": userObject.lastName,
+            "username": ( userObject?.type == "dynamics365" ) ? userObject?.fullname : ( userObject?.type == "salesforce" ) ? userObject?.preferred_username : userObject?.username.toLocaleLowerCase(),
+            "firstName": ( userObject?.type == "dynamics365" ) ? userObject?.firstname : ( userObject?.type == "salesforce" ) ? userObject?.given_name : userObject?.firstName,
+            "lastName": ( userObject?.type == "dynamics365" ) ? userObject?.lastname : ( userObject?.type == "salesforce" ) ? userObject?.family_name : userObject?.lastName,
             "roles": userObject.roles
           }
 
@@ -3465,11 +3722,11 @@ class KeycloakService extends Keycloak {
           }
 
           //Assign Agent to a team
-          let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team/${userObject.group.id}/member`;
+          let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team/${ciscoTeamId}/member`;
 
           data = {
             "type": "agent",
-            "usernames": [ userObject.username.toLocaleLowerCase() ]
+            "usernames": [ ( userObject?.type == "dynamics365" ) ? userObject?.fullname : ( userObject?.type == "salesforce" ) ? userObject?.preferred_username : userObject?.username.toLocaleLowerCase() ]
           }
 
           config2.url = URL4;
@@ -3691,18 +3948,19 @@ class KeycloakService extends Keycloak {
         let introspectToken = await this.getIntrospectToken( rptToken.access_token );
 
         let keyObj = {
-          id: introspectToken.sub,
-          username: introspectToken.username,
-          firstName: introspectToken.given_name,
-          lastName: introspectToken.family_name,
-          roles: introspectToken.realm_access.roles,
+          id: introspectToken?.sub,
+          username: introspectToken?.username,
+          firstName: introspectToken?.given_name,
+          lastName: introspectToken?.family_name,
+          roles: introspectToken?.realm_access?.roles,
+          email: introspectToken?.email,
           permittedResources: {
-            Resources: introspectToken.authorization.permissions,
+            Resources: introspectToken?.authorization?.permissions,
           }
         }
 
         //get user attributes to check its user_name and extension
-        let URL = `${this.keycloakConfig[ "auth-server-url" ]}${this.keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${this.keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
+        let URL = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${keyObj?.id}`;
 
         let config = {
 
@@ -3710,14 +3968,14 @@ class KeycloakService extends Keycloak {
           url: URL,
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${keycloakAdminToken.access_token}`,
+            Authorization: `Bearer ${keycloakAdminToken?.access_token}`,
           }
         };
 
         try {
 
           let userDataResponse = await requestController.httpRequest( config, false );
-          userAttributes = userDataResponse.data.attributes;
+          userAttributes = userDataResponse?.data?.attributes;
 
         } catch ( err ) {
 
@@ -3731,30 +3989,42 @@ class KeycloakService extends Keycloak {
 
         }
 
+        finObj.username = ( finObj?.type == "dynamics365" ) ? finObj?.fullname : ( finObj?.type == "salesforce" ) ? finObj?.preferred_username : finObj?.username;
+        finObj.firstName = ( finObj?.type == "dynamics365" ) ? finObj?.firstname : ( finObj?.type == "salesforce" ) ? finObj?.given_name : finObj?.firstName;
+        finObj.lastName = ( finObj?.type == "dynamics365" ) ? finObj?.lastname : ( finObj?.type == "salesforce" ) ? finObj?.family_name : finObj?.lastName;
+        finObj.email = ( finObj?.type == "dynamics365" ) ? finObj?.internalemailaddress : ( finObj?.type == "salesforce" ) ? finObj?.email : '';
+        finObj.loginName = ( finObj?.type == "salesforce" ) ? finObj?.name : ( finObj?.loginName ) ? finObj?.loginName : '';
+
         //Comparing the basic info of Finesse User and Normal User.
         if ( ( finObj.username ).toLowerCase() != keyObj.username
           || finObj.firstName != keyObj.firstName
           || finObj.lastName != keyObj.lastName
-          || ( userAttributes.user_name && finObj.loginName !== userAttributes.user_name[ 0 ] )
-          || ( userAttributes.extension && finObj.extension !== userAttributes.extension[ 0 ] )
-          || ( !userAttributes.user_name )
+          || finObj.email !== keyObj.email
+          || ( userAttributes.user_name && finObj?.loginName !== userAttributes?.user_name[ 0 ] )
+          || ( userAttributes.extension && finObj?.extension !== userAttributes?.extension[ 0 ] )
+          || ( userAttributes.userid && finObj?.ownerid !== userAttributes?.userid[ 0 ] )
+          || ( finObj?.type !== "dynamics365" && !userAttributes.user_name )
         ) {
 
           data = {
-            username: ( finObj.username ).toLowerCase(),
-            firstName: finObj.firstName,
-            lastName: finObj.lastName,
+            username: ( finObj?.username ).toLowerCase(),
+            firstName: finObj?.firstName,
+            lastName: finObj?.lastName,
+            email: finObj?.email,
             attributes: {
-              "user_name": `${finObj.loginName}`,
-              "extension": `${finObj.extension}`
+              "user_name": `${( finObj?.loginName ) ? finObj?.loginName : ''}`,
+              "extension": `${( finObj?.extension ) ? finObj?.extension : 'CISCO'}`
             }
           };
+
+          finObj?.type == "salesforce" && ( data.attributes.userid = finObj?.user_id );
+          finObj?.type == "dynamics365" && ( data.attributes.userid = finObj?.ownerid );
         }
 
         if ( Object.keys( data ).length > 0 ) {
 
 
-          let URL1 = `${this.keycloakConfig[ "auth-server-url" ]}${this.keycloakConfig[ "USERNAME_ADMIN" ]}/realms/${this.keycloakConfig[ "realm" ]}/users/${keyObj.id}`;
+          let URL1 = `${this.keycloakConfig[ "auth-server-url" ]}admin/realms/${this.keycloakConfig[ "realm" ]}/users/${keyObj?.id}`;
 
           config.url = URL1;
           config.method = 'put';
@@ -3786,36 +4056,36 @@ class KeycloakService extends Keycloak {
 
         //Role to Remove from keycloak user during Update process.
         let ignoreRoles = [ 'offline_access', 'uma_authorization' ];
-        rolesToRemove = keyObj.roles.filter( role => (
-          !finObj.roles.includes( role ) &&
-          !ignoreRoles.includes( role ) &&
+        rolesToRemove = keyObj?.roles.filter( role => (
+          !finObj?.roles.includes( role ) &&
+          !ignoreRoles?.includes( role ) &&
           role.indexOf( "default-roles" ) == -1 ) );
 
         //Updating group data in case it is not similar.
-        let finesseGroups = finObj.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
+        let finesseGroups = finObj?.roles.includes( "supervisor" ) ? [ "agents_permission", "senior_agents_permission" ] : [ "agents_permission" ];
 
         try {
 
-          let token = keycloakAdminToken.access_token;
+          let token = keycloakAdminToken?.access_token;
 
-          let userGroups = await this.getKeycloakUserGroups( keyObj.id, token );
+          let userGroups = await this.getKeycloakUserGroups( keyObj?.id, token );
 
           keycloakGroups = userGroups.map( group => {
             return {
-              id: group.id,
-              name: group.name
+              id: group?.id,
+              name: group?.name
             }
           } );
 
           //find if senior_agents_permission group is assigned to user already against an agent role.
-          let isSeniorAgent = keycloakGroups.some( group => group.name == 'senior_agents_permission' );
+          let isSeniorAgent = keycloakGroups.some( group => group?.name == 'senior_agents_permission' );
 
-          if ( isSeniorAgent && keyObj.roles.includes( 'agent' ) && !finesseGroups.includes( 'senior_agents_permission' ) ) {
+          if ( isSeniorAgent && keyObj?.roles.includes( 'agent' ) && !finesseGroups.includes( 'senior_agents_permission' ) ) {
             finesseGroups.push( 'senior_agents_permission' );
           }
 
-          groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup.name == group ) );
-          groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group.name ) );
+          groupsToAdd = finesseGroups.filter( group => !keycloakGroups.find( keygroup => keygroup?.name == group ) );
+          groupsToRemove = keycloakGroups.filter( group => !finesseGroups.includes( group?.name ) );
 
           //Adding and Removing Roles from Keycloak
           try {
@@ -3824,12 +4094,12 @@ class KeycloakService extends Keycloak {
               const rolesPromises = [];
 
               if ( rolesToAdd.length > 0 ) {
-                let addRolesPromise = this.addOrRemoveUserRole( keyObj.id, rolesToAdd, 'add', token );
+                let addRolesPromise = this.addOrRemoveUserRole( keyObj?.id, rolesToAdd, 'add', token );
                 rolesPromises.push( addRolesPromise );
               }
 
               if ( rolesToRemove.length > 0 ) {
-                let removeRolesPromise = this.addOrRemoveUserRole( keyObj.id, rolesToRemove, 'remove', token );
+                let removeRolesPromise = this.addOrRemoveUserRole( keyObj?.id, rolesToRemove, 'remove', token );
                 rolesPromises.push( removeRolesPromise );
               }
 
@@ -3844,16 +4114,16 @@ class KeycloakService extends Keycloak {
 
                 //Fetching Ids of all the groups to add to current Keycloak User.
                 groupsToAdd = await this.gettingGroupByGroupName( groupsToAdd, token );
-                await this.addOrRemoveUserGroup( keyObj.id, groupsToAdd, 'add', token );
+                await this.addOrRemoveUserGroup( keyObj?.id, groupsToAdd, 'add', token );
               }
 
               if ( groupsToRemove.length > 0 ) {
 
-                await this.addOrRemoveUserGroup( keyObj.id, groupsToRemove, 'remove', token );
+                await this.addOrRemoveUserGroup( keyObj?.id, groupsToRemove, 'remove', token );
               }
 
               //Checking Agent Case first, if agent team in CX is not same as agent team in finesse then update it
-              let userId = keyObj.id;
+              let userId = keyObj?.id;
               let config1 = {
 
                 method: "get",
@@ -3886,36 +4156,129 @@ class KeycloakService extends Keycloak {
 
                 let userTeams = await requestController.httpRequest( config1, true );
 
-                const { userTeam, supervisedTeams } = userTeams.data;
+                if ( finObj?.type == "dynamics365" || finObj?.type == "salesforce" ) {
+
+                  let tempUrl1 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
+
+                  let tempConfig1 = {
+
+                    url: tempUrl1,
+                    method: "get",
+                    headers: {
+                      Accept: "application/json",
+                      "cache-control": "no-cache",
+                      "Content-Type": "application/x-www-form-urlencoded",
+                      Authorization: `Bearer ${keycloakAdminToken?.access_token}`
+                    }
+
+                  };
+
+                  try {
+
+                    let getTeamsList = await requestController.httpRequest( tempConfig1, false );
+
+                    // Access the actual array of teams from the .data property.
+                    const teamsData = getTeamsList?.data;
+
+                    // Check if the teamsData array is empty or not an array.
+                    if ( !Array.isArray( teamsData ) || teamsData.length === 0 ) {
+
+                      console.log( "teamsData array is empty or invalid. Assigning 1 to finObject.group.id." );
+                      finObj?.group.id = 1;
+
+                    } else {
+
+                      const findDefaultTeamId = ( teamsArray ) => {
+
+                        // Rule 1: Find a team with team_name "default" (case-insensitive).
+                        const defaultTeam = teamsArray.find(
+                          ( team ) => team?.team_name && team?.team_name.toLowerCase() === "default"
+                        );
+
+                        if ( defaultTeam ) {
+                          console.log( 'Rule 1 matched: Found team with name "default".' );
+                          return defaultTeam?.team_Id;
+                        }
+
+                        console.log( 'Rule 1 failed: No team with name "default" found.' );
+
+                        // Rule 2: If no "default" team, find a team with team_Id of 1 whose name is NOT "default".
+                        const teamWithIdOne = teamsArray.find(
+                          ( team ) =>
+                            ( team?.team_Id === 1 || team?.team_Id === "1" ) &&
+                            team?.team_name?.toLowerCase() !== "default"
+                        );
+
+                        if ( teamWithIdOne ) {
+                          console.log( "Rule 2 matched: Found a team with team_Id of 1 and a non-default name." );
+                          return crypto.randomUUID();
+                        }
+
+                        console.log( "Rule 2 failed: No suitable team with team_Id of 1 found." );
+
+                        // Rule 3: If no default team was found and no suitable team with ID 1 was found, return a random ID.
+                        console.log( "Rule 3 matched: Defaulting to a new random UUID." );
+                        return crypto.randomUUID();
+                      };
+
+                      // Call the function with the fetched list of teams
+                      const defaultTeamId = findDefaultTeamId( teamsData );
+
+                      // Assign the resulting ID to the finObject
+                      finObj.groupId = defaultTeamId;
+
+                      // You can now use the 'defaultTeamId' variable and the updated userObject
+                      console.log( `The determined default Team ID is: ${defaultTeamId}` );
+                    }
+
+                  } catch ( er ) {
+
+                    let error = await errorService.handleError( er );
+
+                    reject( {
+
+                      error_message: "External Service Team Sync Error: Error occured while checking for default team in CX.",
+                      error_detail: error
+                    } );
+                  }
+
+                }
+
+                ( finObj?.type == "dynamics365" || finObj?.type == "salesforce" ) && ( finObj.groupName = "default" );
+
+                let ciscoTeamId = ( finObj?.type == "dynamics365" || finObj?.type == "salesforce" ) ? finObj.groupId : finObj.group.id;
+
+
+                const { userTeam, supervisedTeams } = userTeams?.data;
 
                 let supervisedTeamsFiltered = [];
 
-                if ( supervisedTeams.length > 0 ) {
+                if ( supervisedTeams?.length > 0 && !( finObj?.type == "dynamics365" || finObj?.type == "salesforce" ) ) {
 
                   //Fetching list of all primary and seconday supervised teams of current user (Whether in CX or Cisco)
                   supervisedTeamsFiltered = supervisedTeams.filter( team => {
-                    const isPrimarySupervisor = team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase();
-                    const isSecondarySupervisor = team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() );
+                    const isPrimarySupervisor = team?.supervisor?.username?.toLocaleLowerCase() === username.toLocaleLowerCase();
+                    const isSecondarySupervisor = team?.secondarySupervisors?.some( secSupervisor => secSupervisor?.username?.toLocaleLowerCase() === username.toLocaleLowerCase() );
 
                     return isPrimarySupervisor || isSecondarySupervisor;
                   } ).map( team => {
                     let type;
-                    if ( team.supervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) {
+                    if ( team?.supervisor?.username?.toLocaleLowerCase() === username.toLocaleLowerCase() ) {
                       type = 'supervisor';
-                    } else if ( team.secondarySupervisors.some( secSupervisor => secSupervisor.username.toLocaleLowerCase() === username.toLocaleLowerCase() ) ) {
+                    } else if ( team?.secondarySupervisors?.some( secSupervisor => secSupervisor?.username?.toLocaleLowerCase() === username.toLocaleLowerCase() ) ) {
                       type = 'secondary supervisor';
                     }
 
-                    return { teamId: team.teamId, teamName: team.teamName, type, source: team.source };
+                    return { teamId: team?.teamId, teamName: team?.teamName, type, source: team?.source };
                   } );
                 }
 
                 //If Agent team in finesse is different from Agent Team in finesse
-                if ( finObj.group.id !== userTeam.teamId ) {
+                if ( ciscoTeamId !== userTeam?.teamId ) {
 
                   //We have to both add agent to a team corresponding to Finesse and remove it from CX team.
                   //Removing agent from CX team first
-                  let URL3 = `${this.keycloakConfig[ "ef-server-url" ]}team/${userTeam.teamId}/member?type=agent&usernames=${finObj.username.toLowerCase()}`;
+                  let URL3 = `${this.keycloakConfig[ "ef-server-url" ]}team/${userTeam?.teamId}/member?type=agent&usernames=${finObj.username.toLowerCase()}`;
 
                   config1.method = 'delete';
                   config1.url = URL3;
@@ -3936,7 +4299,7 @@ class KeycloakService extends Keycloak {
                   }
 
                   //Check whether team of Agent already exists in CX Core or not
-                  let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${finObj.group.id}`;
+                  let URL4 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${ciscoTeamId}`;
 
                   config1.method = 'get';
                   config1.url = URL4;
@@ -3949,14 +4312,14 @@ class KeycloakService extends Keycloak {
                     let createAgentCXTeam;
 
                     //This means the team doesn't exist in CX Core. We need to create a team
-                    if ( getAgentCXTeam.data.length == 0 ) {
+                    if ( getAgentCXTeam?.data?.length == 0 ) {
 
                       //Setting URL to Create CX team of Agent
                       let URL5 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
                       let data = {
-                        "team_Id": finObj.group.id,
-                        "team_name": finObj.group.name,
+                        "team_Id": ( finObj?.type == "dynamics365" || finObj?.type == "salesforce" ) ? ciscoTeamId : finObj.group.id,
+                        "team_name": ( finObj?.type == "dynamics365" || finObj?.type == "salesforce" ) ? finObj?.groupName : finObj.group.name,
                         "supervisor_Id": "",
                         "source": "CISCO",
                         "created_by": "1"
@@ -3984,11 +4347,11 @@ class KeycloakService extends Keycloak {
                     }
 
                     //Assign Agent to a team
-                    let URL6 = `${this.keycloakConfig[ "ef-server-url" ]}team/${finObj.group.id}/member`;
+                    let URL6 = `${this.keycloakConfig[ "ef-server-url" ]}team/${ciscoTeamId}/member`;
 
                     data = {
                       "type": "agent",
-                      "usernames": [ finObj.username.toLowerCase() ]
+                      "usernames": [ finObj?.username?.toLowerCase() ]
                     }
 
                     config2.url = URL6;
@@ -4027,12 +4390,12 @@ class KeycloakService extends Keycloak {
 
                   for ( let supervisedTeam of supervisedTeamsFiltered ) {
 
-                    if ( supervisedTeam.source === 'CISCO' ) {
+                    if ( supervisedTeam?.source === 'CISCO' ) {
 
-                      if ( supervisedTeam.type === 'secondary supervisor' ) {
+                      if ( supervisedTeam?.type === 'secondary supervisor' ) {
 
                         //Removing user from Secondary Supervisor in CX Core
-                        let URL13 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
+                        let URL13 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam?.teamId}/member?type=secondary-supervisor&usernames=${finObj?.username?.toLowerCase()}`;
 
                         config2.method = 'delete';
                         config2.url = URL13;
@@ -4057,10 +4420,10 @@ class KeycloakService extends Keycloak {
                       } else {
 
                         //Removing user from Supervising team in CX Core or not
-                        let URL7 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                        let URL7 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam?.teamId}`;
 
                         let data = {
-                          "team_name": supervisedTeam.teamName,
+                          "team_name": supervisedTeam?.teamName,
                           "supervisor_Id": null
                         }
 
@@ -4091,22 +4454,22 @@ class KeycloakService extends Keycloak {
 
                 //Supervisor Case. Filtering out teams to add and teams to remove from Supervisor
                 //First check that We have supervised Groups in finesse
-                if ( finObj.supervisedGroups ) {
+                if ( finObj?.supervisedGroups ) {
 
-                  let finesseSupervisedGroups = finObj.supervisedGroups;
+                  let finesseSupervisedGroups = finObj?.supervisedGroups;
 
                   // Fetching All the ids of CX Supervised Teams of current Supervisor
-                  const teamIdsInSupervisedTeams = new Set( supervisedTeamsFiltered.map( team => team.teamId ) );
+                  const teamIdsInSupervisedTeams = new Set( supervisedTeamsFiltered.map( team => team?.teamId ) );
 
                   // Teams in which we need to add current user as Supervisor
-                  const teamsToAddInCX = finesseSupervisedGroups.filter( item => !teamIdsInSupervisedTeams.has( item.id ) );
+                  const teamsToAddInCX = finesseSupervisedGroups.filter( item => !teamIdsInSupervisedTeams.has( item?.id ) );
 
                   if ( teamsToAddInCX.length > 0 ) {
 
                     //Adding current user as supervisor in all the given teamsToAddInCX teams.
                     for ( let teamToAdd of teamsToAddInCX ) {
 
-                      let supervisorTeamId = teamToAdd.id;
+                      let supervisorTeamId = teamToAdd?.id;
 
                       //Check whether team of Supervisor already exists in CX Core or not
                       let URL8 = `${this.keycloakConfig[ "ef-server-url" ]}team?ids=${supervisorTeamId}`;
@@ -4118,14 +4481,14 @@ class KeycloakService extends Keycloak {
                         let getSupervisorCXTeam = await requestController.httpRequest( config1, false );
 
                         //This means the team doesn't exist in CX Core. We need to create a team
-                        if ( getSupervisorCXTeam.data.length == 0 ) {
+                        if ( getSupervisorCXTeam?.data?.length == 0 ) {
 
                           //Creating or Updating Supervisor team in CX Core.
                           let URL9 = `${this.keycloakConfig[ "ef-server-url" ]}team`;
 
                           let data = {
                             "team_Id": supervisorTeamId,
-                            "team_name": teamToAdd.name,
+                            "team_name": teamToAdd?.name,
                             "supervisor_Id": userId,
                             "source": "CISCO",
                             "created_by": "1"
@@ -4154,14 +4517,14 @@ class KeycloakService extends Keycloak {
                         } else {
 
                           //If the supervisor is already assigned to team, add current user as secondary supervisor.
-                          if ( getSupervisorCXTeam.data[ 0 ].supervisor_Id != null ) {
+                          if ( getSupervisorCXTeam?.data?.[ 0 ]?.supervisor_Id != null ) {
 
                             //Assign Agent to a team
                             let URL10 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}/member`;
 
                             data = {
                               "type": "secondary-supervisor",
-                              "usernames": [ finObj.username.toLowerCase() ]
+                              "usernames": [ finObj?.username.toLowerCase() ]
                             }
 
                             config2.method = 'post';
@@ -4190,7 +4553,7 @@ class KeycloakService extends Keycloak {
                             let URL11 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisorTeamId}`;
 
                             let data = {
-                              "team_name": getSupervisorCXTeam.data[ 0 ].team_name,
+                              "team_name": getSupervisorCXTeam?.data[ 0 ]?.team_name,
                               "supervisor_Id": userId
                             }
 
@@ -4233,10 +4596,10 @@ class KeycloakService extends Keycloak {
 
 
                   // Fetching All the ids of Finesse Supervised Teams of current Supervisor
-                  const idsInFinesseSupervisedGroups = new Set( finesseSupervisedGroups.map( item => item.id ) );
+                  const idsInFinesseSupervisedGroups = new Set( finesseSupervisedGroups.map( item => item?.id ) );
 
                   // Teams in which we need to remove current user as Supervisor
-                  const teamsToRemoveFromCX = supervisedTeamsFiltered.filter( team => !idsInFinesseSupervisedGroups.has( team.teamId ) );
+                  const teamsToRemoveFromCX = supervisedTeamsFiltered.filter( team => !idsInFinesseSupervisedGroups.has( team?.teamId ) );
 
                   //Removing teams that Supervisor is not supervising anymore in finesse.
                   if ( teamsToRemoveFromCX.length > 0 ) {
@@ -4249,7 +4612,7 @@ class KeycloakService extends Keycloak {
                         if ( supervisedTeam.type === 'secondary supervisor' ) {
 
                           //Removing user from Secondary Supervisor in CX Core
-                          let URL11 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj.username.toLowerCase()}`;
+                          let URL11 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}/member?type=secondary-supervisor&usernames=${finObj?.username.toLowerCase()}`;
 
                           config2.method = 'delete';
                           config2.url = URL11;
@@ -4274,10 +4637,10 @@ class KeycloakService extends Keycloak {
                         } else {
 
                           //Removing user from Supervising team in CX Core
-                          let URL12 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam.teamId}`;
+                          let URL12 = `${this.keycloakConfig[ "ef-server-url" ]}team/${supervisedTeam?.teamId}`;
 
                           let data = {
-                            "team_name": supervisedTeam.teamName,
+                            "team_name": supervisedTeam?.teamName,
                             "supervisor_Id": null
                           }
 
