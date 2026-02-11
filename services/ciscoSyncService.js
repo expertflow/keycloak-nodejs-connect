@@ -3,7 +3,7 @@ const https = require( 'https' );
 
 let requestController = require( "../controller/requestController.js" );
 const ErrorService = require( './errorService.js' );
-const { copyFileSync } = require( 'fs' );
+
 
 const errorService = new ErrorService();
 let realmRoles = [];
@@ -227,8 +227,8 @@ class CiscoSyncService {
                 credentials: [
                     {
                         type: "password",
-                        value: "Expertflow464",
-                        temporary: false,
+                        value: keycloakConfig[ "DEFAULT_USER_PASSWORD" ] || "Expertflow464",
+                        temporary: true,
                     },
                 ],
                 attributes: {
@@ -263,7 +263,7 @@ class CiscoSyncService {
                 //Get list of all the roles in keycloak realm
                 /* Storing all the realm roles in Global realmRoles list.If some role come from finesse which doesn't
                 exist in realmRoles list then we call keycloak roles api again to update realmRoles list. */
-                if ( ciscoUser.roles != [] ) {
+                if ( Array.isArray( ciscoUser.roles ) && ciscoUser.roles.length > 0 ) {
 
                     if ( realmRoles.length > 0 ) {
 
@@ -572,8 +572,8 @@ class CiscoSyncService {
                 let cxTeams = await this.fetchCXTeams( keycloakConfig[ "ef-server-url" ] );
 
                 // Fetch Keycloak users
-                let keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig[ "auth-server-url" ], adminToken );
-                const keycloakUsersByRole = await this.fetchKeycloakUsersByRole( keycloakConfig[ "auth-server-url" ], adminToken );
+                let keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig, adminToken );
+                const keycloakUsersByRole = await this.fetchKeycloakUsersByRole( keycloakConfig, adminToken );
                 const keycloakUsersByPermissionGroups = await this.fetchKeycloakUsersByPermissionGroups( keycloakConfig, adminToken );
 
                 if ( ciscoUsers.length > 0 && ciscoTeams.length > 0 ) {
@@ -585,7 +585,7 @@ class CiscoSyncService {
                     await this.syncUsersToCX( ciscoUsers, keycloakUsers, keycloakUsersByRole, keycloakUsersByPermissionGroups, keycloakConfig, adminToken );
 
                     //Once users are synced, we fetch updated keycloak users list.
-                    keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig[ "auth-server-url" ], adminToken );
+                    keycloakUsers = await this.fetchKeycloakUsers( keycloakConfig, adminToken );
 
                     let userSyncedToMongo = await this.syncKeycloakUsersToCXMongo( keycloakConfig[ "USERNAME_ADMIN" ], keycloakConfig[ "PASSWORD_ADMIN" ], keycloakConfig[ "ef-server-url" ] );
 
@@ -739,6 +739,9 @@ class CiscoSyncService {
                         }
                     } )
 
+                } else {
+
+                    reject( er );
                 }
 
             }
@@ -912,6 +915,9 @@ class CiscoSyncService {
                         }
                     } )
 
+                } else {
+
+                    reject( er );
                 }
 
             }
@@ -919,11 +925,11 @@ class CiscoSyncService {
         } );
     }
 
-    async fetchKeycloakUsers( keycloakURL, adminToken ) {
+    async fetchKeycloakUsers( keycloakConfig, adminToken ) {
 
         return new Promise( async ( resolve, reject ) => {
 
-            let URL = keycloakURL + 'admin/realms/expertflow/users?max=100000';
+            let URL = keycloakConfig[ "auth-server-url" ] + `admin/realms/${keycloakConfig[ "realm" ]}/users?max=100000`;
 
             let config = {
 
@@ -933,8 +939,6 @@ class CiscoSyncService {
                     Accept: "application/json",
                     "cache-control": "no-cache",
                     "Content-Type": "application/x-www-form-urlencoded",
-                },
-                headers: {
                     Authorization: "Bearer " + adminToken,
                 },
 
@@ -952,7 +956,7 @@ class CiscoSyncService {
         } )
     }
 
-    async fetchKeycloakUsersByRole( keycloakURL, adminToken ) {
+    async fetchKeycloakUsersByRole( keycloakConfig, adminToken ) {
 
         return new Promise( async ( resolve, reject ) => {
 
@@ -963,7 +967,7 @@ class CiscoSyncService {
             // Use Promise.all to handle multiple role requests concurrently
             for ( let role of roles ) {
 
-                const URL = `${keycloakURL}admin/realms/expertflow/roles/${role}/users?max=1000000`;
+                const URL = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${keycloakConfig[ "realm" ]}/roles/${role}/users?max=1000000`;
 
                 const config = {
                     method: "get",
@@ -1023,7 +1027,7 @@ class CiscoSyncService {
                 // Use Promise.all to handle multiple role requests concurrently
                 for ( let group of permissionGroupsObj ) {
 
-                    const URL = `${keycloakConfig[ "auth-server-url" ]}admin/realms/expertflow/groups/${group.id}/members?max=1000000`;
+                    const URL = `${keycloakConfig[ "auth-server-url" ]}admin/realms/${keycloakConfig[ "realm" ]}/groups/${group.id}/members?max=1000000`;
 
                     const config = {
 

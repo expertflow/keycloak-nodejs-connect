@@ -97,9 +97,7 @@ class TeamsService {
                     headers: {
                         'Accept': 'application/json',
                         'cache-control': 'no-cache',
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
                         'Authorization': 'Bearer ' + token
                     }
                 };
@@ -133,9 +131,7 @@ class TeamsService {
                     headers: {
                         'Accept': 'application/json',
                         'cache-control': 'no-cache',
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
                         'Authorization': 'Bearer ' + token
                     }
                 };
@@ -164,7 +160,7 @@ class TeamsService {
 
             try {
 
-                supervisedGroups.forEach( async group => {
+                for ( const group of supervisedGroups ) {
 
                     let URL = keycloakConfig[ "auth-server-url" ] + 'admin/realms/' + keycloakConfig.realm + '/groups/' + group.id;
 
@@ -174,9 +170,7 @@ class TeamsService {
                         headers: {
                             'Accept': 'application/json',
                             'cache-control': 'no-cache',
-                            'Content-Type': 'application/x-www-form-urlencoded'
-                        },
-                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
                             'Authorization': 'Bearer ' + token
                         },
                         data: {
@@ -192,7 +186,7 @@ class TeamsService {
                     } catch ( error ) {
                         reject( error );
                     }
-                } );
+                }
 
                 resolve( 'Supervisors Added' );
 

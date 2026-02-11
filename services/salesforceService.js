@@ -14,10 +14,10 @@ class SalesforceService {
 
             let config = {
                 method: 'get',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
                 url: URL,
                 headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                     'Authorization': `Bearer ${validationToken}`
                 },
                 //disable ssl

@@ -97,6 +97,9 @@ class FinesseService {
                         }
                     } )
 
+                } else {
+
+                    reject( er );
                 }
 
             }
@@ -189,6 +192,9 @@ class FinesseService {
                         }
                     } )
 
+                } else {
+
+                    reject( er );
                 }
             }
 

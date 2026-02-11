@@ -1179,7 +1179,7 @@ class KeycloakService extends Keycloak {
                       //Fetching Groups data for each user.
                       try {
 
-                        let teamData = await this.getUserSupervisedGroups( responseObject.id, admin_token, type, responseObject?.roles );
+                        let teamData = await this.getUserSupervisedGroups( responseObject?.id, responseObject?.username, admin_token, type, responseObject?.roles );
 
                         //Check for Permission Groups assignment and roles assignment against them
                         const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
@@ -2209,7 +2209,7 @@ class KeycloakService extends Keycloak {
     } );
   }
 
-  async getUserSupervisedGroups( userId, adminToken, type, roles ) {
+  async getUserSupervisedGroups( userId, username, adminToken, type, roles ) {
 
     return new Promise( async ( resolve, reject ) => {
 
@@ -2247,8 +2247,17 @@ class KeycloakService extends Keycloak {
             } );
           }
 
+          // Only add teams where user is actually supervisor
+          const filteredSupervisedTeams = supervisedTeams.filter(
+            team =>
+              // Condition 1: Check if user is the primary supervisor
+              team?.supervisor_Id === userId ||
+              // Condition 2: Check if user is in the secondary supervisors array
+              ( team?.secondarySupervisors || [] ).some( supervisor => supervisor?.username === username )
+          );
+
           team.userTeam = userTeam;
-          team.supervisedTeams = supervisedTeams;
+          team.supervisedTeams = filteredSupervisedTeams;
 
         } catch ( er ) {
 
@@ -2256,8 +2265,30 @@ class KeycloakService extends Keycloak {
 
             error = await errorService.handleError( er );
 
-            // Log the error and proceed with default values
-            console.error( "User Team Fetch Error: An error occurred while fetching the user's team:", error );
+            // Check if it's a timeout or network error
+            if ( error.status === 408 ) {
+              reject( {
+                error_message: "Team API Timeout Error: The request to fetch user's team information timed out.",
+                error_detail: {
+                  status: 408,
+                  reason: "Request Timeout: The team API did not respond within the expected time. Please check the team service availability or try again later."
+                }
+              } );
+            } else if ( error.status === 404 || error.status === 'ENOTFOUND' || error.status === 'EHOSTUNREACH' ) {
+              reject( {
+                error_message: "Team API Connection Error: Unable to connect to the team service.",
+                error_detail: {
+                  status: error.status,
+                  reason: error.reason || "Connection Error: The team API is unreachable. Please verify the team service URL and network connectivity."
+                }
+              } );
+            } else {
+              // For other errors, reject with the handled error
+              reject( {
+                error_message: "Team API Error: An error occurred while fetching the user's team information.",
+                error_detail: error
+              } );
+            }
           }
 
         }
@@ -2998,7 +3029,7 @@ class KeycloakService extends Keycloak {
 
         } catch ( err ) {
 
-          let error = await errorService.handleError( er );
+          let error = await errorService.handleError( err );
 
           reject( {
 
@@ -3294,20 +3325,20 @@ class KeycloakService extends Keycloak {
 
         if ( externalServiceLoginResponse?.status == 200 ) {
 
-          externalServiceLoginResponse?.data?.roles = userRolesArr;
-          externalServiceLoginResponse?.data?.type = type;
+          externalServiceLoginResponse.data.roles = userRolesArr;
+          externalServiceLoginResponse.data.type = type;
 
           let trimmedUsername;
 
           if ( type == 'dynamics365' ) {
 
             trimmedUsername = externalServiceLoginResponse?.data?.fullname.trim().split( ' ' )[ 0 ]; // Removes leading/trailing spaces
-            externalServiceLoginResponse?.data?.fullname = trimmedUsername;
+            externalServiceLoginResponse.data.fullname = trimmedUsername;
           } else if ( type == 'salesforce' ) {
 
             trimmedUsername = externalServiceLoginResponse?.data?.preferred_username.trim().split( ' ' )[ 0 ]; // Removes leading/trailing spaces
-            externalServiceLoginResponse?.data?.fullname = trimmedUsername;
-            externalServiceLoginResponse?.data?.username = trimmedUsername;
+            externalServiceLoginResponse.data.fullname = trimmedUsername;
+            externalServiceLoginResponse.data.username = trimmedUsername;
           }
 
           try {
@@ -4184,7 +4215,7 @@ class KeycloakService extends Keycloak {
                     if ( !Array.isArray( teamsData ) || teamsData.length === 0 ) {
 
                       console.log( "teamsData array is empty or invalid. Assigning 1 to finObject.group.id." );
-                      finObj?.group.id = 1;
+                      finObj.group.id = 1;
 
                     } else {
 
@@ -4862,7 +4893,7 @@ class KeycloakService extends Keycloak {
                       //Fetching Groups data for each user.
                       try {
 
-                        let teamData = await this.getUserSupervisedGroups( responseObject.id, admin_token, 'CX' );
+                        let teamData = await this.getUserSupervisedGroups( responseObject?.id, responseObject?.username, admin_token, 'CX', responseObject?.roles );
 
                         //Check for Permission Groups assignment and roles assignment against them
                         const checkUserRoleAndPermissions = this.checkUserRoleAndPermissions( teamData, responseObject );
@@ -5541,7 +5572,7 @@ class KeycloakService extends Keycloak {
 
           try {
 
-            const events = await fetchAdminEvents( this.keycloakConfig[ "auth-server-url" ], this.keycloakConfig[ "realm" ], this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ] );
+            const events = await fetchAdminEvents( this.keycloakConfig[ "auth-server-url" ], this.keycloakConfig[ "realm" ], this.keycloakConfig[ "USERNAME_ADMIN" ], this.keycloakConfig[ "PASSWORD_ADMIN" ], this.keycloakConfig );
             const newEvents = getNewEvents( events );
 
             newEvents.forEach( event => {
@@ -5653,7 +5684,7 @@ let getNewEvents = ( events ) => {
   return previousEvents;
 };
 
-let fetchAdminEvents = ( baseUrl, realm, adminUsername, adminPassword ) => {
+let fetchAdminEvents = ( baseUrl, realm, adminUsername, adminPassword, keycloakConfig ) => {
 
   return new Promise( async ( resolve, reject ) => {
 
@@ -5661,19 +5692,40 @@ let fetchAdminEvents = ( baseUrl, realm, adminUsername, adminPassword ) => {
 
     try {
 
-      //Fetching admin token, we pass it in our "Create User" API for authorization
-      keycloakAdminToken = await this.getAccessToken( adminUsername, adminPassword );
+      //Fetching admin token inline since this is a module-level function without class context
+      let tokenURL = `${baseUrl}realms/${realm}/protocol/openid-connect/token`;
+
+      let tokenConfig = {
+        method: "post",
+        url: tokenURL,
+        headers: {
+          Accept: "application/json",
+          "cache-control": "no-cache",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data: {
+          username: adminUsername,
+          password: adminPassword,
+          client_id: keycloakConfig.CLIENT_ID,
+          client_secret: keycloakConfig.credentials.secret,
+          grant_type: keycloakConfig.GRANT_TYPE,
+        },
+      };
+
+      let tokenResponse = await requestController.httpRequest( tokenConfig, true );
+      keycloakAdminToken = tokenResponse.data;
 
     } catch ( err ) {
 
       let error = await errorService.handleError( err );
 
-      return ( {
+      reject( {
 
         error_message: "Keycloak Admin Token Fetch Error: An error occurred while fetching the keycloak admin token in the Admin Events component.",
         error_detail: error
       } );
 
+      return;
     }
 
     const url = `${baseUrl}admin/realms/${realm}/admin-events`;

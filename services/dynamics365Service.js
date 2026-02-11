@@ -15,12 +15,12 @@ class Dynamics365Service {
 
             let config = {
                 method: 'get',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'OData-MaxVersion': '4.0',
-                'OData-Version': '4.0',
                 url: URL,
                 headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'OData-MaxVersion': '4.0',
+                    'OData-Version': '4.0',
                     'Authorization': `Bearer ${validationToken}`
                 },
                 //disable ssl
