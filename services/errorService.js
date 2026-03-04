@@ -84,7 +84,11 @@ class ErrorService {
 
                                 let reasonToReturn
                                 if ( err.response.status === 400 ) {
-                                    reasonToReturn = 'Password Update Required: Please update your password, as it was set temporarily by the admin or has expired.'
+                                    if(errorData.error_description.includes('Account disabled')){
+                                        reasonToReturn = "Account Disabled: User account has been disabled in Keycloak."
+                                    }
+                                    else 
+                                        reasonToReturn = 'Password Update Required: Please update your password, as it was set temporarily by the admin or has expired.'
                                 }
                                 else reasonToReturn = 'Invalid User Credentials: The provided credentials are not valid. Please enter valid user credentials.'
                                 return {
@@ -121,7 +125,7 @@ class ErrorService {
                     } else {
 
                         if ( typeof ( err.response.data ) === "object" ) {
-
+                            
                             return {
                                 status: err.response.status,
                                 reason: err.response.data.error

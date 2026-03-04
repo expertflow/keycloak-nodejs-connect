@@ -408,7 +408,7 @@ class KeycloakService extends Keycloak {
     try {
 
       let userDetails = await requestController.httpRequest( config, true );
-
+      
       if ( userDetails.data[ 0 ] ) {
         return userDetails.data[ 0 ];    // extracting user details from response object
       }
@@ -560,7 +560,15 @@ class KeycloakService extends Keycloak {
     try {
       otpManagerResponse = await requestController.httpRequest( config, false );
     } catch ( error ) {
-      return Promise.reject( error.response.data )
+      // Prefer OTP Manager's structured response when available
+      if ( error && error.response && error.response.data ) {
+        return Promise.reject( error.response.data );
+      }
+
+      return Promise.reject( {
+        error: 500,
+        message: 'An error occured while communicating with OTP Manager.',
+      } );
     }
     return Promise.resolve( otpManagerResponse.data )
   }
@@ -587,7 +595,14 @@ class KeycloakService extends Keycloak {
     try {
       otpManagerResponse = await requestController.httpRequest( config, false );
     } catch ( error ) {
-      return Promise.reject( error.response.data )
+      if ( error && error.response && error.response.data ) {
+        return Promise.reject( error.response.data );
+      }
+
+      return Promise.reject( {
+        error: 500,
+        message: 'An error occured while communicating with OTP Manager.',
+      } );
     }
     return Promise.resolve( otpManagerResponse.data )
   }
@@ -628,7 +643,7 @@ class KeycloakService extends Keycloak {
           }
           newAttributes.is2FARegistered = true
 
-          this.updateUserAttributes( adminToken, userDetails.id, newAttributes )
+          await this.updateUserAttributes( adminToken, userDetails.id, newAttributes )
         }
       }
 
@@ -664,12 +679,24 @@ class KeycloakService extends Keycloak {
 
         try {
           let verificationStatus = await requestController.httpRequest( config, false );
-          if ( verificationStatus.status !== 200 || !verificationStatus.data || ( verificationStatus.data.attemptResponseCode !== 'SUCCESS' && verificationStatus.data.attemptReasonCode !== 'CREDENTIAL_VERIFIED' ) ) {
-            throw false
+
+          const isSuccessful =
+            verificationStatus &&
+            verificationStatus.status === 200 &&
+            verificationStatus.data &&
+            ( verificationStatus.data.attemptResponseCode === 'SUCCESS' ||
+              verificationStatus.data.attemptReasonCode === 'CREDENTIAL_VERIFIED' );
+
+          // If RSA reached and responded but token is invalid, treat as auth failure
+          if ( !isSuccessful ) {
+            return Promise.reject( {
+              error: 401,
+              error_message: 'Invalid verification code. Please try again.'
+            } );
           }
         }
         catch ( err ) {
-          return Promise.reject( { error: 400, error_message: "Error occured while verifying token from RSA SecurID. This may be due to invalid token, invalid configurations or some issue with SecurID." } )
+          return Promise.reject( { error: 400, error_message: "Error occured while verifying token from RSA SecurID. This may be due to invalid configurations or some issue with SecurID." } )
         }
 
       }
@@ -691,7 +718,7 @@ class KeycloakService extends Keycloak {
           // updating user attributes if he is registering for 2FA using SMS or Email OTP
           if ( userAttributes.is2FARegistered[ 0 ] == 'false' ) {
             twoFAConfigs.is2FARegistered = true
-            this.updateUserAttributes( adminToken, userDetails.id, twoFAConfigs )
+            await this.updateUserAttributes( adminToken, userDetails.id, twoFAConfigs )
           }
 
         } catch ( error ) {
@@ -1347,10 +1374,30 @@ class KeycloakService extends Keycloak {
 
         error = await errorService.handleError( er );
 
-        reject( {
+        let user_details
+        if(error.status === 400 && error.reason?.includes("Password Update Required")){
+          const adminData = await this.getAccessToken( this.keycloakConfig.USERNAME_ADMIN, this.keycloakConfig.PASSWORD_ADMIN )
+          const adminToken = adminData.access_token
+
+          let userDetails = await this.getUserDetails( adminToken, user_name )
+          if(userDetails?.requiredActions?.includes('UPDATE_PASSWORD')){
+            user_details = {
+              userId: userDetails.id, 
+              username: user_name
+            }
+          }
+        }
+
+        let errorResponse = {
           error_message: "Token Generation Error: Failed to generate a user access token.",
-          error_detail: error
-        } );
+          error_detail: error,
+        };
+
+        if (user_details) {
+          errorResponse.user_details = user_details;
+        }
+
+        reject( errorResponse );
 
       }
     } );
@@ -2235,6 +2282,11 @@ class KeycloakService extends Keycloak {
         try {
 
           let userTeams = await requestController.httpRequest( config, true );
+
+          if ( !userTeams.data || typeof userTeams.data !== "object" || !("userTeam" in userTeams.data) || !("supervisedTeams" in userTeams.data) ) {
+            throw new Error("Invalid team API response format");
+          }
+
           const { userTeam, supervisedTeams } = userTeams.data;
 
           if ( Object.keys( userTeam ).length == 0 && type != 'CX' ) {
@@ -2265,6 +2317,16 @@ class KeycloakService extends Keycloak {
 
             error = await errorService.handleError( er );
 
+            if ( er && er.message === "Invalid team API response format" ) {
+              return reject( {
+                error_message: "Team API Response Error: The team service returned an unexpected response format.",
+                error_detail: {
+                  status: 502,
+                  reason: "Invalid Team API URL: The configured ef-server-url is reachable but does not return expected data. An HTML response was returned instead of JSON. Please verify the ef-server-url configuration."
+                }
+              } );
+            }
+
             // Check if it's a timeout or network error
             if ( error.status === 408 ) {
               reject( {
@@ -2279,7 +2341,7 @@ class KeycloakService extends Keycloak {
                 error_message: "Team API Connection Error: Unable to connect to the team service.",
                 error_detail: {
                   status: error.status,
-                  reason: error.reason || "Connection Error: The team API is unreachable. Please verify the team service URL and network connectivity."
+                  reason: "Connection Error: The team API is unreachable. Please verify the team service URL and network connectivity."
                 }
               } );
             } else {
@@ -2299,9 +2361,9 @@ class KeycloakService extends Keycloak {
         config.headers.Authorization = "Bearer " + adminToken;
 
         try {
-
+          
           let userGroup = await requestController.httpRequest( config, true );
-
+          
           if ( userGroup.data.length != 0 ) {
 
             let groups = userGroup.data;
