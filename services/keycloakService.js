@@ -543,7 +543,7 @@ class KeycloakService extends Keycloak {
       url: URL,
       headers: {
         'Content-Type': 'application/json',
-        'tenant-id': twoFAData.tenantId
+        'tenantid': twoFAData.tenantId
       },
       data: {
         customerChannelIdentifier: customerChannelIdentifier,
@@ -580,7 +580,7 @@ class KeycloakService extends Keycloak {
       url: URL,
       headers: {
         'Content-Type': 'application/json',
-        'tenant-id': tenantId
+        'tenantid': tenantId
       },
       data: {
         customerChannelIdentifier: twoFAData.customerChannelIdentifier,
@@ -2269,7 +2269,7 @@ class KeycloakService extends Keycloak {
           Accept: "application/json",
           "cache-control": "no-cache",
           "Content-Type": "application/x-www-form-urlencoded",
-          "tenant-id": this.keycloakConfig[ "realm" ]
+          "tenantid": this.keycloakConfig[ "realm" ]
         },
       };
 
@@ -3726,7 +3726,7 @@ class KeycloakService extends Keycloak {
             Accept: "application/json",
             "cache-control": "no-cache",
             "Content-Type": "application/x-www-form-urlencoded",
-            "tenant-id": this.keycloakConfig[ "realm" ]
+            "tenantid": this.keycloakConfig[ "realm" ]
           }
 
         };
@@ -3738,7 +3738,7 @@ class KeycloakService extends Keycloak {
             Accept: "application/json",
             "cache-control": "no-cache",
             "Content-Type": "application/json",
-            "tenant-id": this.keycloakConfig[ "realm" ]
+            "tenantid": this.keycloakConfig[ "realm" ]
           },
 
         };
@@ -4224,7 +4224,7 @@ class KeycloakService extends Keycloak {
                   Accept: "application/json",
                   "cache-control": "no-cache",
                   "Content-Type": "application/x-www-form-urlencoded",
-                  "tenant-id": this.keycloakConfig[ "realm" ]
+                  "tenantid": this.keycloakConfig[ "realm" ]
                 }
 
               };
@@ -4240,7 +4240,7 @@ class KeycloakService extends Keycloak {
                   Accept: "application/json",
                   "cache-control": "no-cache",
                   "Content-Type": "application/json",
-                  "tenant-id": this.keycloakConfig[ "realm" ]
+                  "tenantid": this.keycloakConfig[ "realm" ]
                 },
 
               };
